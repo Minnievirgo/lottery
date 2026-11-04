@@ -1,0 +1,18 @@
+{
+  "name": "lottery-app",
+  "version": "1.1.0",
+  "description": "抽签软件 - Node.js 内置 http；本地 SQLite 或 Turso 云端持久库双后端",
+  "main": "server.js",
+  "scripts": {
+    "start": "node --experimental-sqlite server.js",
+    "migrate:turso": "node --experimental-sqlite migrate-to-turso.js",
+    "test": "node --experimental-sqlite selftest.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@libsql/client": "^0.18.0"
+  }
+}

@@ -1,0 +1,16 @@
+# docker compose up -d
+# 说明：SQLite 数据落在宿主机 ./data 目录（容器重启/重建不丢）
+services:
+  lottery:
+    build: .
+    container_name: lottery
+    restart: always
+    ports:
+      # 仅监听本机，由 Caddy 反向代理对外；不直接把 3000 暴露公网
+      - "127.0.0.1:3000:3000"
+    environment:
+      # 建议上线时改成强密码（此处与当前一致，可自行修改）
+      ADMIN_PASSWORD: "Tdsw2008"
+      DATA_DIR: /data
+    volumes:
+      - ./data:/data

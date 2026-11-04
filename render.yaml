@@ -1,0 +1,30 @@
+# Render Blueprint —— 长期稳定方案（0 元）
+#
+# 架构：Render 免费 Web Service（计算，文件系统会被清空但无所谓） + Turso 免费云端 SQLite（数据，永久持久）
+# 结果：固定 https://<服务名>.onrender.com，电脑可关，重启/休眠/重新部署数据都不丢。
+#
+# 前置：
+#   1) 在 turso.tech 注册（GitHub/Google 登录，免费版无需信用卡），建一个数据库
+#   2) 拿到 libsql://xxx.turso.io 与 auth token
+#   3) 把本项目推到 GitHub 仓库
+#   4) Render 控制台 → New → Blueprint → 选仓库 → Apply
+#   5) 在面板里填下面 3 个环境变量（sync: false 表示由你手动填）
+#
+# 已有本地数据要搬过去：本机执行 npm run migrate:turso（详见 DEPLOY.md）
+
+services:
+  - type: web
+    name: lottery
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    envVars:
+      - key: ADMIN_PASSWORD
+        sync: false          # 管理后台密码，务必自己设一个强的
+      - key: TURSO_URL
+        sync: false          # libsql://xxxx.turso.io
+      - key: TURSO_TOKEN
+        sync: false          # Turso auth token
+      - key: DATA_DIR
+        value: /data         # 云模式下不用，仅为兼容本地模式保留

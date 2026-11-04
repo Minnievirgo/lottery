@@ -1,0 +1,14 @@
+node_modules/
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# 隧道私钥，绝不入库
+tunnel_key
+tunnel_key.pub
+.tools/
+*.log
+
+# 本地备份文件
+*完整备份*.json
