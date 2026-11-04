@@ -23,28 +23,54 @@ Turso 用的是 SQLite 方言（libSQL），SQL 无需改写；项目 `db.js` �
 不配置环境变量 = 本地 SQLite（和以前一样，零依赖）；配置 `TURSO_URL`/`TURSO_TOKEN` = 自动切云端库。
 
 ### 操作步骤
-1. **建云端库**（约 3 分钟）
-   - 打开 `turso.tech`，用 GitHub / Google 账号登录（免费版无需信用卡）
-   - 创建一个数据库，地域选离你近的（新加坡/香港附近）
-   - 复制 **Database URL**（`libsql://xxxx.turso.io`）和 **Auth Token**
-2. **推代码到 GitHub**
-   - 把 `lottery/` 目录推到一个仓库
-   - `tunnel_key`、`.tools/`、`data/`、`node_modules/` 已被 `.gitignore` 排除（**SSH 私钥绝不能入库**）
-3. **Render 部署**
-   - Render 控制台 → **New → Blueprint** → 选该仓库 → Apply（会自动读 `render.yaml`）
-   - 在面板里填 3 个环境变量：
-     - `ADMIN_PASSWORD` = 你的管理密码（务必改掉默认值）
-     - `TURSO_URL` = `libsql://xxxx.turso.io`
-     - `TURSO_TOKEN` = 上一步的 token
-   - 部署完成后得到固定地址，例如 `https://lottery-xxxx.onrender.com`
-4. **验证**
-   - 打开 `https://你的地址/api/health`，应返回 `{"ok":true,"mode":"turso"}`
-   - 打开 `/admin` 登录，建一个抽签抽一次，然后**手动重启服务**（Render 面板 Restart），数据应仍在
-5. **把现有本地数据搬上云**（可选）
-   ```bash
-   TURSO_URL=libsql://xxxx.turso.io TURSO_TOKEN=xxx npm run migrate:turso
-   ```
-   脚本会把本机 `data/app.db` 的三张表整体写入云端库（幂等，可重复执行）。
+#### 1) 拿 Turso 的 URL 和 Token（约 3 分钟）
+- 打开 **https://app.turso.tech**，用 GitHub / Google 账号登录（免费版无需信用卡）
+- 点 **Create Database** → 填名字（如 `lottery`）→ 地域建议选亚洲节点（Singapore `sin` 等，离 Render 近）
+  - 若界面让选引擎，选**默认的 libSQL / SQLite 兼容**（不要选 `--tursodb` 那个新引擎，本项目用 `@libsql/client` 连接）
+- 回到 Databases 列表，在该数据库这一行打开右侧 **⋯ 菜单**：
+  - **Copy URL** → 得到 `libsql://lottery-xxxx.turso.io`（这就是 `TURSO_URL`）
+  - **Create Token** → 权限选 **Read & Write**、有效期选 **Never / 不过期** → 复制那串 `eyJ...`（这就是 `TURSO_TOKEN`）
+- CLI 备选（Windows 需 WSL）：
+  ```bash
+  turso auth signup
+  turso db create lottery                       # 不加 --tursodb，建 libSQL 库
+  turso db show lottery --url                   # URL
+  turso db tokens create lottery --expiration none   # Token（永不过期）
+  ```
+
+#### 2) 拿 GitHub 仓库地址
+- 打开 **https://github.com** 注册/登录 → 右上角 **+** → **New repository**
+- 仓库名填 `lottery`，选 **Public** 或 Private 都行
+- ⚠️ **不要**勾选 "Add a README / .gitignore / license"（本地仓库已有内容，勾了会冲突）
+- 点 **Create repository**，页面会给出地址：`https://github.com/你的用户名/lottery.git`（这就是仓库地址）
+- 推送代码（本机已 `git init` + 首次提交，且 `tunnel_key`、`data/`、`node_modules/` 已被 `.gitignore` 排除）：
+  ```bash
+  git remote add origin https://github.com/你的用户名/lottery.git
+  git push -u origin main
+  ```
+  没配过 Git 身份认证的话，最简单是装 **GitHub Desktop**（登录后自动配置，Add local repository → Publish repository）；
+  或用 Personal Access Token：GitHub → Settings → Developer settings → Personal access tokens → 勾 `repo` 生成，作为推送密码。
+
+#### 3) Render 部署
+- Render 控制台 → **New → Blueprint** → 选该仓库 → Apply（会自动读 `render.yaml`）
+- 在面板里填 3 个环境变量：
+  - `ADMIN_PASSWORD` = 你的管理密码（务必改掉默认值）
+  - `TURSO_URL` = 第 1 步的 `libsql://...`
+  - `TURSO_TOKEN` = 第 1 步的 `eyJ...`
+- 部署完成后得到固定地址，例如 `https://lottery-xxxx.onrender.com`
+
+#### 4) 验证
+- 打开 `https://你的地址/api/health`，应返回 `{"ok":true,"mode":"turso"}`
+- 打开 `/admin` 登录，建一个抽签抽一次，然后**手动重启服务**（Render 面板 Restart），数据应仍在
+
+#### 5) 把现有本地数据搬上云（可选）
+```bash
+TURSO_URL=libsql://xxxx.turso.io TURSO_TOKEN=xxx npm run migrate:turso
+```
+脚本会把本机 `data/app.db` 的三张表整体写入云端库（幂等，可重复执行）。
+
+> 需要交给协助部署者的信息：`TURSO_URL`、`TURSO_TOKEN`、GitHub 仓库地址（或 GitHub 用户名 + PAT）。
+> Token 等同于数据库密码，只在私密渠道传递，用完可在 Turso 控制台 invalidate 撤销。
 
 ### 已知限制
 - 免费 Render 实例闲置 15 分钟休眠，**首次访问约 30~60 秒冷启动**（之后正常）。活动开始前自己先点一次链接"热机"即可。
