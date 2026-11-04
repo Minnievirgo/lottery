@@ -60,7 +60,20 @@ const db = require('./db');
   });
   assert.equal(edited.title, '自检抽签-改');
   assert.equal(edited.items.length, 3, '编辑后结果项不应丢失');
-  assert.equal(edited.items.find(i => i.name === '一等奖').remaining, 0, '已抽走的限量项剩余应为0');
+  // 重算规则：限量项 remaining = max(0, 上限 - 已抽中数)；不限量项恒为 -1。
+  // 抽签是加权随机，不能假定「张三一定抽中一等奖」，故逐项按实际抽中数校验，
+  // 避免回归测试因随机结果偶发失败。
+  const st2 = await db.stats(id);
+  for (const it of edited.items) {
+    if (it.limit_count === -1) {
+      assert.equal(it.remaining, -1, `不限量项「${it.name}」剩余应恒为 -1`);
+    } else {
+      const hit = st2.items.find(s => s.id === it.id);
+      const used = hit ? hit.count : 0;
+      assert.equal(it.remaining, Math.max(0, it.limit_count - used),
+        `限量项「${it.name}」编辑后剩余应重算为 max(0, 上限 - 已抽中数)`);
+    }
+  }
 
   // 7. 关闭后不可抽
   await db.updateDraw(sold.id, { status: 'closed' });
