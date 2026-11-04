@@ -72,6 +72,23 @@ TURSO_URL=libsql://xxxx.turso.io TURSO_TOKEN=xxx npm run migrate:turso
 > 需要交给协助部署者的信息：`TURSO_URL`、`TURSO_TOKEN`、GitHub 仓库地址（或 GitHub 用户名 + PAT）。
 > Token 等同于数据库密码，只在私密渠道传递，用完可在 Turso 控制台 invalidate 撤销。
 
+#### 交给 AI 代跑的一键脚本
+拿到凭证后执行 `deploy-remote.js`，它会自动完成：验证云端库连通且可写 → 建 GitHub 仓库 → 推送代码 →
+（可选）迁移本地数据 → 输出 Render 需要填的全部参数。
+
+```bash
+TURSO_URL=libsql://xxx.turso.io TURSO_TOKEN=eyJ... \
+GITHUB_USER=你的用户名 GITHUB_TOKEN=ghp_... \
+MIGRATE=1 ADMIN_PASSWORD=你的密码 \
+node deploy-remote.js
+```
+
+- 凭证**只通过环境变量传入**，不写入任何文件、不打印完整值；git remote 保存为不含凭证的干净地址。
+- `MIGRATE=1` 会把本机 `data/app.db` 的数据搬到云端库（覆盖云端同名表，仅首次需要）。
+- 若另外提供 `RENDER_API_KEY` + `RENDER_OWNER_ID`，脚本会尝试用 Render API 直接创建服务；
+  失败也不影响，会退回打印手工步骤。
+- **Render 首次连接 GitHub 需要网页 OAuth 授权，这一步无法用 API 代替**，仍需人工在控制台点一次。
+
 ### 已知限制
 - 免费 Render 实例闲置 15 分钟休眠，**首次访问约 30~60 秒冷启动**（之后正常）。活动开始前自己先点一次链接"热机"即可。
 - `*.onrender.com` 是境外默认域名。微信一般能打开，但如被风控提示，走第 3 节绑自己的域名。
