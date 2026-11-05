@@ -1,26 +1,29 @@
 # 抽签系统 · 部署与长期运行指南
 
-> ## ⭐ 当前推荐（国内网络环境）：第 3 节「香港服务器」
-> 实测（2026-11-05，中国大陆网络）：`github.com` 主站被阻断、无法完成注册/登录/OAuth，
-> 而 `cloud.tencent.com` 正常。Turso / GitHub / Render 都是境外站点，**打不开就没法拿 Token**。
-> 因此若你和大多数国内用户一样没有外网访问，请直接看 **第 3 节**：全程只访问腾讯云官网，
-> 固定链接、数据在自己硬盘、微信可开、长期稳定，约 55 元/月。
+> ## ⭐ 当前推荐（境外网站已可访问）：第 1 节「Render + Turso」，0 元
+> 复测（2026-11-05）：`github.com` **200**、`api.github.com` 200、`app.turso.tech` 307、
+> `dashboard.render.com` 200、`api.render.com` 200 —— 境外站点已正常可达（此前 `github.com` 超时不通），
+> 因此**改回 0 元长期方案**：固定 `https://<服务名>.onrender.com`、电脑可关、数据存云端持久库、长期反复用。
 >
 > 三种用法对比：
 > | 方案 | 是否需要外网 | 费用 | 适合 |
 > |---|---|---|---|
-> | **3. 香港服务器（推荐）** | ❌ **不需要** | 约 55 元/月 + 域名 | 长期反复用、多人、微信分享 |
-> | 1. Render + Turso | ✅ 需要（GitHub/Turso/Render 登录） | 0 元 | 能顺畅访问境外网站时 |
+> | **1. Render + Turso（推荐）** | ✅ 需要（现已可用） | **0 元** | 长期反复用、多人、微信分享 |
+> | 3. 香港服务器 | ❌ 不需要 | 约 55 元/月 + 域名 | 不想依赖境外平台、数据完全自己掌握 |
 > | 2. 本机隧道 | ❌ 不需要（但链接是境外域名） | 0 元 | 一次性临时活动 |
 >
-> ⚠️ 第 1 节的 0 元方案在**无法登录境外网站**时不可行，别在上面浪费时间。
+> 备选路线都保留着：以后若又打不开境外网站，看 [DEPLOY-CLOUDBASE.md](./DEPLOY-CLOUDBASE.md)
+> （腾讯云 CloudBase FREE，国内可达、0 元）或第 3 节香港服务器。**代码两条路线互不影响**：
+> `render.yaml`/`Dockerfile` 只打包 `db.js + server.js + migrate-to-turso.js + public`，
+> 不会把 `cloudbase/` 相关文件带进镜像。
 
 ---
 
-## 1. 仅当你能访问境外网站：Render + Turso，0 元，固定链接
+## 1. ⭐ 当前主推：Render + Turso，0 元，固定链接
 
-> ⚠️ **前置条件**：能在浏览器登录 `github.com`、`app.turso.tech`、`dashboard.render.com`。
-> 实测国内 `github.com` 主站被阻断（10 秒超时），若你也打不开，直接跳到 **第 3 节**。
+> ✅ **前置条件已满足**：能在浏览器登录 `github.com`、`app.turso.tech`、`dashboard.render.com`
+> （2026-11-05 复测全部可达）。若以后又打不开，跳到 [DEPLOY-CLOUDBASE.md](./DEPLOY-CLOUDBASE.md)
+> （国内 0 元）或 **第 3 节**香港服务器。
 
 ### 为什么不是"直接用 Render 免费实例"
 实测查证（2026-11）：**Render 免费实例的文件系统在每次 redeploy、restart 和 spin-down 休眠时都会被清空**，
@@ -134,7 +137,7 @@ Windows 直接双击 **`start-tunnel.cmd`**（起服务 + 开隧道 + 断线自�
 
 ---
 
-## 3. ⭐ 推荐：香港服务器（无需外网、长期稳定、微信可开）
+## 3. 备选：香港服务器（无需外网、长期稳定、微信可开）
 
 **为什么这条路不需要外网**：你只在 `cloud.tencent.com`（国内正常访问）上买机器和域名；
 装 Docker / 申请证书 / 拉 npm 包这些境外请求都发生在**香港服务器**上，香港节点国际出口正常。
@@ -220,10 +223,12 @@ cp /opt/lottery/data/app.db /opt/lottery/data/app.db.bak-$(date +%F)
 | `TURSO_URL` | 空 | 设置后启用云端持久库（如 `libsql://xxx.turso.io`） |
 | `TURSO_TOKEN` | 空 | Turso auth token |
 | `DATA_DIR` | `./data` | 仅本地模式有效 |
-| `PORT` | `3000` | 监听端口 |
+| `PORT` | `3000` | 监听端口（Render 由平台注入） |
+| `DB_DRIVER` | 空 | 仅设为 `cloudbase` 时启用备选数据层；**Render / 本地 / 服务器不要设置** |
 
 - 健康检查：`GET /api/health` → `{"ok":true,"mode":"local"|"turso"}`
-- 回归测试：`npm test`（local）；`TURSO_URL=file:./test.db node selftest.js`（turso 路径，无需账号）
+- 回归测试：`npm run test:all`（四套：local / cloudbase mock / HTTP 桥接 / 真实 HTTP 服务 local+turso），
+  自动用 `.tools/` 隔离目录，不碰真实数据
 - 改密码：环境变量优先于代码默认值；`ADMIN_PASSWORD=新密码 npm start`
 
 ---
@@ -233,7 +238,7 @@ cp /opt/lottery/data/app.db /opt/lottery/data/app.db.bak-$(date +%F)
 ```bash
 npm install                 # 只有云端模式需要；本地模式零依赖也能跑
 npm start                    # http://localhost:3000，后台 /admin
-npm test                     # 数据层回归测试
+npm run test:all             # 四套回归测试（含真实 HTTP 服务冒烟）
 ```
 
 不设 `TURSO_URL` 时完全走 Node 内置 `node:sqlite`，数据在本机 `data/app.db`，无需任何外部服务。

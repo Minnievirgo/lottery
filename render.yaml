@@ -1,4 +1,4 @@
-# Render Blueprint —— 长期稳定方案（0 元）
+# Render Blueprint —— 当前主推方案（0 元）
 #
 # 架构：Render 免费 Web Service（计算，文件系统会被清空但无所谓） + Turso 免费云端 SQLite（数据，永久持久）
 # 结果：固定 https://<服务名>.onrender.com，电脑可关，重启/休眠/重新部署数据都不丢。
