@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>抽签</title>
+  <link rel="stylesheet" href="/user.css" />
+</head>
+<body>
+  <!-- 浩瀚星系 + 星空 -->
+  <canvas id="galaxy"></canvas>
+  <canvas id="stars"></canvas>
+
+  <main class="card" id="app">
+    <!-- 加载中 -->
+    <div class="state-loading" id="loading">
+      <div class="spinner"></div>
+      <p>正在加载抽签…</p>
+    </div>
+
+    <!-- 主界面 -->
+    <div class="state-main hidden" id="main">
+      <div class="title-pill" id="drawTitlePill">DRAW · 抽签</div>
+      <h1 class="title" id="drawTitle">抽签</h1>
+      <p class="desc" id="drawDesc"></p>
+
+      <div class="input-wrap">
+        <input id="nameInput" type="text" maxlength="20" placeholder="请输入您的姓名" autocomplete="off" />
+      </div>
+
+      <button class="draw-btn" id="drawBtn">
+        <span class="hex"></span>
+        <span class="btn-text">开始抽签</span>
+        <span class="btn-glow"></span>
+      </button>
+      <p class="hint" id="hint">点击按钮，揭晓你的签</p>
+    </div>
+
+    <!-- 结果揭晓 -->
+    <div class="state-result hidden" id="result">
+      <div class="result-card" id="resultCard">
+        <div class="result-label">抽签结果</div>
+        <div class="result-name" id="resultName">—</div>
+        <div class="result-desc" id="resultDesc"></div>
+      </div>
+      <button class="again-btn hidden" id="againBtn">换人再抽</button>
+    </div>
+
+    <!-- 异常状态 -->
+    <div class="state-msg hidden" id="msg">
+      <div class="msg-icon" id="msgIcon">!</div>
+      <p class="msg-text" id="msgText"></p>
+      <button class="again-btn" id="backBtn">返回</button>
+    </div>
+  </main>
+
+  <canvas id="confetti"></canvas>
+  <script src="/cosmic-bg.js"></script>
+  <script src="/user.js"></script>
+</body>
+</html>

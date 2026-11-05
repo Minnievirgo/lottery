@@ -1,8 +1,14 @@
-// selftest.js —— 数据层双后端回归测试
-//   node --experimental-sqlite selftest.js                     # local (node:sqlite)
-//   TURSO_URL=file:./data/selftest.db node selftest.js turso  # turso (libSQL 本地文件，API 与云端一致)
+// selftest.js —— 数据层回归测试（三种驱动共用同一套业务断言）
+//   node --experimental-sqlite selftest.js                                  # local (node:sqlite)
+//   TURSO_URL=file:./data/selftest.db node selftest.js turso               # turso (libSQL 本地文件)
+//   CLOUDBASE_MOCK=1 SELFTEST_DRIVER=cloudbase node selftest.js            # cloudbase (内存 Mock，无需云账号)
 const assert = require('node:assert/strict');
-const db = require('./db');
+// 回归测试第 9 步会 importAll 覆盖整个库；未显式指定 DATA_DIR 时强制用隔离目录，
+// 避免误清空真实 data/app.db。
+if (!process.env.DATA_DIR && !process.env.TURSO_URL && process.env.SELFTEST_DRIVER !== 'cloudbase') {
+  process.env.DATA_DIR = './.tools/selftest-db';
+}
+const db = process.env.SELFTEST_DRIVER === 'cloudbase' ? require('./db-cloudbase') : require('./db');
 
 (async () => {
   await db.ready;

@@ -6,7 +6,13 @@
   "scripts": {
     "start": "node --experimental-sqlite server.js",
     "migrate:turso": "node --experimental-sqlite migrate-to-turso.js",
-    "test": "node --experimental-sqlite selftest.js"
+    "migrate:cloudbase": "node migrate-to-cloudbase.js",
+    "build:cloudbase": "node build-cloudbase.js",
+    "test": "node --experimental-sqlite selftest.js",
+    "test:cloudbase": "node -e \"process.env.CLOUDBASE_MOCK='1';process.env.SELFTEST_DRIVER='cloudbase';require('./selftest.js')\"",
+    "test:http": "node -e \"process.env.DB_DRIVER='cloudbase';process.env.CLOUDBASE_MOCK='1';require('./selftest-http.js')\"",
+    "test:server": "node selftest-server.js",
+    "test:all": "npm test && npm run test:cloudbase && npm run test:http && npm run test:server"
   },
   "engines": {
     "node": ">=22.5.0"

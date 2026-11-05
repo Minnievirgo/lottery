@@ -1,0 +1,21 @@
+{
+  "_comment": "复制本文件为 cloudbaserc.json 后填入你的环境 ID，再执行 tcb 命令。不要把密码提交到仓库。",
+  "envId": "YOUR_ENV_ID",
+  "functionRoot": "./cloudbase/function",
+  "functions": [
+    {
+      "name": "lottery-api",
+      "timeout": 10,
+      "memorySize": 256,
+      "runtime": "Nodejs18",
+      "installDependency": true,
+      "envVariables": {
+        "DB_DRIVER": "cloudbase"
+      }
+    }
+  ],
+  "hosting": {
+    "localPath": "./cloudbase/hosting",
+    "remotePath": "/"
+  }
+}

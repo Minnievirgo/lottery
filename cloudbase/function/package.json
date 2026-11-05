@@ -1,0 +1,10 @@
+{
+  "name": "lottery-api",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.js",
+  "description": "抽签系统 CloudBase 云函数（由 build-cloudbase.js 生成，勿手动改依赖外的文件）",
+  "dependencies": {
+    "@cloudbase/node-sdk": "^3.0.0"
+  }
+}

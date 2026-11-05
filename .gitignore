@@ -12,3 +12,11 @@ tunnel_key.pub
 
 # 本地备份文件
 *完整备份*.json
+
+# CloudBase：环境 ID / 凭证不入库；云函数依赖不入库
+cloudbaserc.json
+cloudbase/function/node_modules/
+cloudbase/function/package-lock.json
+
+# 说明：cloudbase/hosting/ 与 cloudbase/function/public/ 是构建产物（体积很小），
+#       刻意保留在仓库里，方便不开 Node 也能直接上传部署。

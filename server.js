@@ -1,16 +1,41 @@
 // server.js —— Node 内置 http 服务：静态托管 + API 路由 + 管理员鉴权
+// 同一套 handle() 被两种入口复用：
+//   1) 本地/服务器：本文件直接运行 → http.createServer(handle).listen(PORT)
+//   2) CloudBase 云函数：cloudbase/function/index.js 把网关 event 转成伪 req/res 后调用 handle
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const db = require('./db');
+// DB_DRIVER=cloudbase 时切到 CloudBase 文档数据库；默认仍是本地 SQLite / Turso 双后端（零改动、零风险）。
+const db = process.env.DB_DRIVER === 'cloudbase' ? require('./db-cloudbase') : require('./db');
 
 const PORT = process.env.PORT || 3000;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'Tdsw2008';
 const PUBLIC_DIR = path.join(__dirname, 'public');
-const adminTokens = new Set();
 
 function sha256(s) { return crypto.createHash('sha256').update(String(s)).digest('hex'); }
+
+// ---- 管理员 token：HMAC 无状态签名 ----
+// Serverless 云函数会冷启动、多实例并存，内存 Set 存不住登录态。
+// 改成「时间戳 + HMAC(密码派生密钥)」自校验 token：任意实例都能验证，无需共享存储；
+// 顺带让本地/服务器模式重启后登录态也不丢（7 天有效），改密码后旧 token 立即失效。
+const TOKEN_TTL = 7 * 24 * 3600 * 1000;
+function tokenSecret() { return crypto.createHash('sha256').update('lottery-admin:' + ADMIN_PASSWORD).digest(); }
+function makeAdminToken() {
+  const t = Date.now().toString(36);
+  const sig = crypto.createHmac('sha256', tokenSecret()).update(t).digest('base64url');
+  return t + '.' + sig;
+}
+function validAdminToken(tok) {
+  if (!tok || typeof tok !== 'string') return false;
+  const [t, sig] = tok.split('.');
+  if (!t || !sig) return false;
+  const ts = parseInt(t, 36);
+  if (!Number.isFinite(ts) || ts > Date.now() + 60000 || Date.now() - ts > TOKEN_TTL) return false;
+  const expected = crypto.createHmac('sha256', tokenSecret()).update(t).digest('base64url');
+  const a = Buffer.from(sig), b = Buffer.from(expected);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
@@ -46,8 +71,9 @@ function serveStatic(res, pathname) {
   res.writeHead(403); res.end('Forbidden');
 }
 
-const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host}`);
+// 路由主体（导出给云函数入口复用）
+async function handle(req, res) {
+  const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const pathname = url.pathname;
   const method = req.method;
 
@@ -63,9 +89,7 @@ const server = http.createServer(async (req, res) => {
       if (pathname === '/api/admin/login' && method === 'POST') {
         const body = await readBody(req).catch(() => ({}));
         if (sha256(body.password || '') === sha256(ADMIN_PASSWORD)) {
-          const token = crypto.randomBytes(24).toString('base64url');
-          adminTokens.add(token);
-          return send(res, 200, { ok: true, token });
+          return send(res, 200, { ok: true, token: makeAdminToken() });
         }
         return send(res, 401, { ok: false, message: '密码错误' });
       }
@@ -87,7 +111,7 @@ const server = http.createServer(async (req, res) => {
 
       // 以下接口需要管理员鉴权
       const token = req.headers['x-admin-token'];
-      if (!adminTokens.has(token)) return send(res, 401, { ok: false, message: '未授权，请先登录' });
+      if (!validAdminToken(token)) return send(res, 401, { ok: false, message: '未授权，请先登录' });
 
       // 列表
       if (pathname === '/api/admin/draws' && method === 'GET') {
@@ -168,14 +192,19 @@ const server = http.createServer(async (req, res) => {
     if (!res.headersSent) send(res, 500, { error: 'server_error', message: e.message });
     else res.end();
   }
-});
+}
 
-db.ready.then(() => {
-  server.listen(PORT, () => {
-    console.log(`抽签服务已启动: http://localhost:${PORT}  [${db.MODE}]`);
-    console.log(`管理后台: http://localhost:${PORT}/admin  (密码由环境变量 ADMIN_PASSWORD 配置)`);
+module.exports = { handle };
+
+// 仅在「直接运行本文件」时启动常驻 HTTP 服务；云函数入口只 require handle，不监听端口。
+if (require.main === module) {
+  db.ready.then(() => {
+    http.createServer(handle).listen(PORT, () => {
+      console.log(`抽签服务已启动: http://localhost:${PORT}  [${db.MODE}]`);
+      console.log(`管理后台: http://localhost:${PORT}/admin  (密码由环境变量 ADMIN_PASSWORD 配置)`);
+    });
+  }).catch(e => {
+    console.error('[fatal] 数据库初始化失败：', e);
+    process.exit(1);
   });
-}).catch(e => {
-  console.error('[fatal] 数据库初始化失败：', e);
-  process.exit(1);
-});
+}

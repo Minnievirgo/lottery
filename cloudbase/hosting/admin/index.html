@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>抽签管理后台</title>
+  <link rel="stylesheet" href="/admin.css" />
+</head>
+<body>
+  <!-- 宇宙星系 + 星空背景（与用户页共用）-->
+  <canvas id="galaxy"></canvas>
+  <canvas id="stars"></canvas>
+
+  <!-- 登录 -->
+  <section class="login" id="login">
+    <div class="login-card">
+      <div class="logo">⚡ 抽签管理后台</div>
+      <input id="pwd" type="password" placeholder="请输入管理员密码" />
+      <button id="loginBtn">登 录</button>
+      <p class="login-err" id="loginErr"></p>
+    </div>
+  </section>
+
+  <!-- 主面板 -->
+  <section class="panel hidden" id="panel">
+    <header class="topbar">
+      <div class="brand">⚡ 抽签管理后台</div>
+      <div class="top-actions">
+        <button class="btn-ghost" id="backupBtn" title="导出全部抽签与参与名单为 JSON">备份</button>
+        <button class="btn-primary" id="newBtn">+ 新建抽签</button>
+        <button class="btn-ghost" id="logoutBtn">退出</button>
+      </div>
+    </header>
+
+    <div class="wrap">
+      <div id="drawList" class="draw-list"></div>
+      <div id="empty" class="empty hidden">还没有抽签活动，点击右上角「新建抽签」开始。</div>
+    </div>
+  </section>
+
+  <!-- 抽屉/弹窗：创建编辑 -->
+  <div class="modal hidden" id="editModal">
+    <div class="modal-box">
+      <div class="modal-head">
+        <h3 id="editTitle">新建抽签</h3>
+        <button class="x" data-close>×</button>
+      </div>
+      <div class="modal-body">
+        <label class="fld">活动标题
+          <input id="f_title" type="text" maxlength="40" placeholder="例如：年会幸运抽签" />
+        </label>
+        <label class="fld">活动说明（可选）
+          <textarea id="f_desc" rows="2" maxlength="200" placeholder="展示给用户看的说明文字"></textarea>
+        </label>
+        <label class="fld row">
+          <span>防止同一姓名重复抽签</span>
+          <input id="f_anti" type="checkbox" checked />
+        </label>
+
+        <div class="gen-row">
+          <span class="gen-label">快速生成「发言顺序签」</span>
+          <input id="genNum" type="number" min="1" max="999" placeholder="如 48" />
+          <button class="btn-ghost sm" id="genBtn">生成 1~N</button>
+          <span class="gen-tip">自动生成 1~N 共 N 个签，每签数量 1</span>
+        </div>
+
+        <div class="items-head">
+          <span>结果项（名称 / 数量 / 权重 / 颜色）</span>
+          <button class="btn-ghost sm" id="addItem">+ 添加</button>
+        </div>
+        <div id="items" class="items"></div>
+        <p class="tip">数量留空或填 -1 表示不限量；权重越大被抽中的概率越高。</p>
+      </div>
+      <div class="modal-foot">
+        <button class="btn-ghost" data-close>取消</button>
+        <button class="btn-primary" id="saveBtn">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 弹窗：名单 -->
+  <div class="modal hidden" id="listModal">
+    <div class="modal-box">
+      <div class="modal-head">
+        <h3>参与名单</h3>
+        <button class="x" data-close>×</button>
+      </div>
+      <div class="modal-body">
+        <table class="tbl" id="listTbl">
+          <thead><tr><th>姓名</th><th>结果</th><th>时间</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div id="listEmpty" class="empty sm">暂无参与记录</div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn-ghost" data-close>关闭</button>
+        <button class="btn-primary" id="exportBtn">导出 CSV</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 弹窗：统计 -->
+  <div class="modal hidden" id="statModal">
+    <div class="modal-box">
+      <div class="modal-head">
+        <h3>抽签统计</h3>
+        <button class="x" data-close>×</button>
+      </div>
+      <div class="modal-body" id="statBody"></div>
+      <div class="modal-foot"><button class="btn-ghost" data-close>关闭</button></div>
+    </div>
+  </div>
+
+  <div class="toast hidden" id="toast"></div>
+  <script src="/cosmic-bg.js"></script>
+  <script src="/admin.js"></script>
+</body>
+</html>
