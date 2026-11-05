@@ -12,18 +12,55 @@
 > | 3. 香港服务器 | ❌ 不需要 | 约 55 元/月 + 域名 | 不想依赖境外平台、数据完全自己掌握 |
 > | 2. 本机隧道 | ❌ 不需要（但链接是境外域名） | 0 元 | 一次性临时活动 |
 >
-> 备选路线都保留着：以后若又打不开境外网站，看 [DEPLOY-CLOUDBASE.md](./DEPLOY-CLOUDBASE.md)
-> （腾讯云 CloudBase FREE，国内可达、0 元）或第 3 节香港服务器。**代码两条路线互不影响**：
-> `render.yaml`/`Dockerfile` 只打包 `db.js + server.js + migrate-to-turso.js + public`，
-> 不会把 `cloudbase/` 相关文件带进镜像。
+> 备选路线：第 3 节香港服务器（约 55 元/月，最稳）；[DEPLOY-CLOUDBASE.md](./DEPLOY-CLOUDBASE.md)
+> 的 CloudBase FREE 虽 0 元、国内可达、无需信用卡，但**默认域名有「访问提示中间页」且免费版无法移除**
+> （需备案自定义域名，免费版不支持），不满足「微信点链接直达」，**仅作本地验证/演示，不要用于对外发布**。
+> **代码两条路线互不影响**：`render.yaml`/`Dockerfile` 只打包
+> `db.js + server.js + migrate-to-turso.js + public`，不会把 `cloudbase/` 文件带进镜像。
 
 ---
 
 ## 1. ⭐ 当前主推：Render + Turso，0 元，固定链接
 
 > ✅ **前置条件已满足**：能在浏览器登录 `github.com`、`app.turso.tech`、`dashboard.render.com`
-> （2026-11-05 复测全部可达）。若以后又打不开，跳到 [DEPLOY-CLOUDBASE.md](./DEPLOY-CLOUDBASE.md)
-> （国内 0 元）或 **第 3 节**香港服务器。
+> （2026-11-05 复测全部可达）。若以后又打不开，跳到 **第 3 节**香港服务器
+> （CloudBase FREE 因默认域名中间页问题，不作对外发布方案）。
+
+### 0) 先读：创建时的两个坑（2026-11-05 实测）
+
+**坑一：新账号的账号级绑卡验证。** Render 官方免费层写着 "No credit card is required"，
+但部分新账号会被风控命中 —— **Blueprint、手动 Web Service、Public Git Repository、Render API
+四个入口都会弹 Add Card**，换浏览器/换入口无效。Stripe 只做 `$1 USD` 临时预授权
+（页面原文 `You won't be charged`），1~7 工作日自动释放；保持 Free、不升级、不超 750 小时/月
+就不会产生费用。
+
+- `Your card does not support this type of purchase.` 是**发卡行**返回的，不是信息填错，重试无用。
+  需 Visa / Mastercard **信用卡**（非借记卡、非纯银联 62 开头），且开通
+  「境外支付 / 无卡支付 / 3D Secure」；账单国家与地址必须与银行预留一致。
+- **先去 Billing 页加卡**：点弹窗里的 `billing page` 链接 → Add Payment Method，
+  确认卡片末四位已显示后再回来创建。在创建弹窗里加常因 3DS 窗口被挡而静默失败。
+- 反复尝试会触发风控，累计 3 次失败就停，别硬试。
+
+**坑二：默认勾了付费套餐 + 环境变量容易填错。**
+
+免 GitHub OAuth 的创建方式：仓库为 public 时走
+`New → Web Service → Public Git Repository`，直接贴仓库 `.git` 地址、分支 `main`，
+无需连接 Git Provider（代价是没有 push 自动部署，改代码后面板手动 Deploy）。
+
+| 字段 | 值 |
+|---|---|
+| Language / Runtime | **Docker** |
+| Region | Singapore |
+| Instance Type | **Free**（`$0/month · 0.1 CPU · 512MB`）← 默认是 `$7/month`，**务必改回** |
+| Health Check Path | `/api/health` |
+| `TURSO_URL` | `libsql://xxx.turso.io` |
+| `TURSO_TOKEN` | `eyJ...`（**别填成 `ghp_` 开头的 GitHub PAT**） |
+| `ADMIN_PASSWORD` | 自己的密码（覆盖代码默认值） |
+| `PORT` | `3000`（与 Dockerfile `EXPOSE 3000` 一致） |
+| `DATA_DIR` | **不填**；留了空行就点垃圾桶删掉 |
+
+日志出现 `抽签服务已启动 ... [turso]` 和 `Your service is live` 即成功；
+若显示 `[local]`，说明 `TURSO_URL` 没生效，**别继续用**（数据会写进临时磁盘，重启即丢）。
 
 ### 为什么不是"直接用 Render 免费实例"
 实测查证（2026-11）：**Render 免费实例的文件系统在每次 redeploy、restart 和 spin-down 休眠时都会被清空**，

@@ -199,7 +199,8 @@ module.exports = { handle };
 // 仅在「直接运行本文件」时启动常驻 HTTP 服务；云函数入口只 require handle，不监听端口。
 if (require.main === module) {
   db.ready.then(() => {
-    http.createServer(handle).listen(PORT, () => {
+    // Render 等平台要求显式绑定 0.0.0.0；Node 默认绑 :: ，在其网络栈下会探测不到端口
+    http.createServer(handle).listen(PORT, '0.0.0.0', () => {
       console.log(`抽签服务已启动: http://localhost:${PORT}  [${db.MODE}]`);
       console.log(`管理后台: http://localhost:${PORT}/admin  (密码由环境变量 ADMIN_PASSWORD 配置)`);
     });

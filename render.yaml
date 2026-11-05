@@ -8,7 +8,8 @@
 #   2) 拿到 libsql://xxx.turso.io 与 auth token
 #   3) 把本项目推到 GitHub 仓库
 #   4) Render 控制台 → New → Blueprint → 选仓库 → Apply
-#   5) 在面板里填下面 3 个环境变量（sync: false 表示由你手动填）
+#   5) 在面板里填 2 个环境变量（sync: false 表示由你手动填）：ADMIN_PASSWORD / TURSO_TOKEN
+#      TURSO_URL 已固化在下方 value 中（非敏感），无需手填，也避免误填成变量名
 #
 # 已有本地数据要搬过去：本机执行 npm run migrate:turso（详见 DEPLOY.md）
 
@@ -23,7 +24,8 @@ services:
       - key: ADMIN_PASSWORD
         sync: false          # 管理后台密码，务必自己设一个强的
       - key: TURSO_URL
-        sync: false          # libsql://xxxx.turso.io
+        # 数据库地址非敏感，直接固化，避免面板里误把变量名当值填入导致 URL_INVALID
+        value: libsql://draw-lots-minnie.aws-ap-southeast-1.turso.io
       - key: TURSO_TOKEN
         sync: false          # Turso auth token
       - key: DATA_DIR

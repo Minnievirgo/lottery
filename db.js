@@ -52,6 +52,8 @@ async function init() {
   if (MODE === 'turso') {
     // 延迟加载：本地模式不装依赖也能跑
     const { createClient } = require('@libsql/client');
+    // 诊断日志：URL 非敏感，打印运行时真正收到的值，便于定位「面板填对了但进程拿到旧值」
+    console.log('[db] 运行时 TURSO_URL =', JSON.stringify(TURSO_URL));
     client = createClient({ url: TURSO_URL, authToken: TURSO_TOKEN || undefined, intMode: 'number' });
     await client.executeMultiple(SCHEMA);
     console.log('[db] 模式: turso（云端持久库）', TURSO_URL.replace(/:\/\/.*@/, '://***@'));
