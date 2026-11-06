@@ -176,3 +176,53 @@ body {
   background: rgba(14, 19, 44, .95); border: 1px solid var(--border); color: var(--text);
   padding: 12px 22px; border-radius: 12px; font-size: 14px; box-shadow: 0 10px 30px rgba(0,0,0,.5), 0 0 30px rgba(139,123,255,.15);
 }
+
+/* ===== 增量：导出发言顺序表单 / 分享二维码 ===== */
+.modal-box.wide { max-width: 560px; }
+.modal-box.qr-box { max-width: 380px; }
+
+fieldset.fld-group {
+  border: 1px solid var(--border); border-radius: 12px;
+  padding: 12px 14px 2px; margin: 0 0 16px; min-width: 0;
+}
+fieldset.fld-group legend { padding: 0 8px; font-size: 13px; color: var(--blue); font-weight: 600; }
+.fld-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 14px; }
+.fld input[type=time], .fld input[type=number] {
+  width: 100%; margin-top: 6px; padding: 10px 12px; border-radius: 10px; font-size: 14px;
+  background: rgba(6,10,26,.7); border: 1px solid var(--border); color: var(--text); outline: none;
+}
+.fld input[type=time]:focus, .fld input[type=number]:focus {
+  border-color: var(--blue); box-shadow: 0 0 0 3px rgba(90,209,255,.12);
+}
+.fld-msg { display: none; margin-top: 4px; font-size: 12px; color: var(--danger); line-height: 1.4; }
+.fld.err .fld-msg { display: block; }
+.fld.err input, .fld.err textarea {
+  border-color: var(--danger) !important; box-shadow: 0 0 0 3px rgba(248,113,113,.15);
+}
+#sch_breakFields.disabled { opacity: .45; }
+#sch_breakFields.disabled input { pointer-events: none; }
+.form-error {
+  margin-bottom: 14px; padding: 10px 12px; border-radius: 10px;
+  border: 1px solid rgba(248,113,113,.5); background: rgba(248,113,113,.10);
+  color: #ffc9c9; font-size: 13px; line-height: 1.5; word-break: break-all;
+}
+.btn-primary.disabled { opacity: .45; cursor: not-allowed; }
+
+.qr-body { text-align: center; }
+.qr-canvas { width: 240px; height: 240px; display: block; margin: 0 auto 14px; }
+.qr-url {
+  user-select: all; -webkit-user-select: all; word-break: break-all;
+  font-size: 12px; color: var(--muted); cursor: pointer; line-height: 1.5;
+}
+
+/* 第 7 个「二维码」按钮：青蓝描边强调 */
+.dc-actions button[data-act=qr] { color: var(--blue); border-color: rgba(90,209,255,.55); }
+.dc-actions button[data-act=qr]:hover {
+  background: rgba(90,209,255,.14); border-color: rgba(90,209,255,.85);
+  box-shadow: 0 0 14px rgba(90,209,255,.28);
+}
+/* 窄屏：7 个按钮每行 3 个不溢出；表单两列折叠为一列 */
+@media (max-width: 420px) {
+  .dc-actions button { flex: 1 1 calc(33.333% - 6px); min-width: 0; }
+  .fld-grid { grid-template-columns: 1fr; }
+}

@@ -8,6 +8,10 @@ const path = require('path');
 const crypto = require('crypto');
 // DB_DRIVER=cloudbase 时切到 CloudBase 文档数据库；默认仍是本地 SQLite / Turso 双后端（零改动、零风险）。
 const db = process.env.DB_DRIVER === 'cloudbase' ? require('./db-cloudbase') : require('./db');
+// F1/F2 共用同一份排序纯函数；F2 排程与 XMLSS 生成均为零依赖纯函数
+const resultSort = require('./public/lib/result-sort');
+const schedule = require('./public/lib/schedule');
+const spreadsheetml = require('./public/lib/spreadsheetml');
 
 const PORT = process.env.PORT || 3000;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'Tdsw2008';
@@ -180,6 +184,48 @@ async function handle(req, res) {
         });
         return res.end(csv);
       }
+      // 导出发言顺序 .xls（Excel 2003 SpreadsheetML，服务端生成）
+      // 放在 L113 validAdminToken 鉴权之后；GET /export 路由上方一行不改。
+      m = pathname.match(/^\/api\/admin\/draws\/([^/]+)\/export-schedule$/);
+      if (m && method === 'POST') {
+        // 处理顺序：readBody → validateParams → getDrawRaw → participants → 排序 → 排程 → 容量 → XML
+        const body = await readBody(req).catch(() => ({}));
+        const checked = schedule.validateParams(body);
+        if (!checked.ok) {
+          return send(res, 400, {
+            error: 'invalid_params',
+            message: '时间参数或发言节奏设置不合法',
+            fields: checked.fields
+          });
+        }
+        const draw = await db.getDrawRaw(m[1]);
+        if (!draw) return send(res, 404, { error: 'not_found' });
+        const parts = await db.participants(m[1]);
+        if (!parts.length) return send(res, 400, { error: 'no_participants', message: '暂无参与记录' });
+        // participants() 返回 camelCase，必须显式传 accessor，与 CSV 的 snake_case 行区分
+        const sorted = resultSort.sortRows(parts, p => p.resultName, p => p.drawnAt, p => p.id);
+        const slots = schedule.computeSlots(sorted, checked.params);
+        const plan = schedule.buildPlan(slots, checked.params);
+        if (!plan.ok) {
+          // 容量超限：不生成任何文件，返回结构化 400 让前端在 #schError 展示
+          return send(res, 400, {
+            error: plan.error,
+            message: plan.message,
+            capacity: plan.capacity,
+            total: plan.total,
+            overflow: plan.overflow,
+            advice: plan.advice
+          });
+        }
+        const xml = spreadsheetml.buildWorkbook(plan.rows, checked.params);
+        // 严格 application/vnd.ms-excel（不加 charset）；CloudBase 桥接会据此走 base64，
+        // 这是正确行为（http-bridge.js:68-74），不要改成 text/xml。
+        res.writeHead(200, {
+          'Content-Type': 'application/vnd.ms-excel',
+          'Content-Disposition': spreadsheetml.contentDisposition(checked.params.title)
+        });
+        return res.end(xml);
+      }
       return send(res, 404, { error: 'not_found' });
     }
 
@@ -199,7 +245,8 @@ module.exports = { handle };
 // 仅在「直接运行本文件」时启动常驻 HTTP 服务；云函数入口只 require handle，不监听端口。
 if (require.main === module) {
   db.ready.then(() => {
-    http.createServer(handle).listen(PORT, () => {
+    // Render 等平台要求显式绑定 0.0.0.0；Node 默认绑 :: ，在其网络栈下会探测不到端口
+    http.createServer(handle).listen(PORT, '0.0.0.0', () => {
       console.log(`抽签服务已启动: http://localhost:${PORT}  [${db.MODE}]`);
       console.log(`管理后台: http://localhost:${PORT}/admin  (密码由环境变量 ADMIN_PASSWORD 配置)`);
     });

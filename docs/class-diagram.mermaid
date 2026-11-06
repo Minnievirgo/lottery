@@ -1,0 +1,182 @@
+classDiagram
+    direction LR
+
+    class ResultSort {
+        <<module>>
+        +normalizeResultValue(v) : ResultKey
+        +compareResultName(a, b) : int
+        +sortRows(rows, getResult, getDrawnAt, getId) : Row[]
+    }
+    note for ResultSort "public/lib/result-sort.js (UMD)"
+    class ShareUrl {
+        <<module>>
+        +makeShareUrl(origin, drawId) : String
+    }
+    note for ShareUrl "public/lib/share-url.js (UMD)"
+    class ScheduleKit {
+        <<module>>
+        +parseHHmm(s) : int
+        +fmtHHmm(minutes) : String
+        +validateParams(raw) : ValidationResult
+        +computeSlots(rows, params) : Slot[]
+        +buildPlan(slots, params) : Plan
+    }
+    note for ScheduleKit "public/lib/schedule.js (Node)"
+    class SpreadsheetML {
+        <<module>>
+        +escapeXml(s) : String
+        +sanitizeFilename(s) : String
+        +contentDisposition(title) : String
+        +buildStyles() : String
+        +buildColumnDefs() : String
+        +mergeRuns(plan) : MergeRun[]
+        +buildRows(plan, params) : RowXml
+        +buildWorkbook(plan, params) : String
+    }
+    note for SpreadsheetML "public/lib/spreadsheetml.js (Node)"
+    class ScheduleParams {
+        <<data>>
+        +title : String
+        +amStart : String
+        +amEnd : String
+        +pmStart : String
+        +pmEnd : String
+        +duration : int
+        +gap : int
+        +breakEnabled : bool
+        +breakEvery : int
+        +breakMinutes : int
+        +remark : String
+    }
+    class Slot {
+        <<data>>
+        +seq : int
+        +name : String
+        +start : int
+        +end : int
+        +period : String
+        +switched : bool
+        +breakApplied : bool
+        +overflow : bool
+    }
+    class PlanRow {
+        <<data>>
+        +kind : String
+        +seq : int
+        +name : String
+        +start : String
+        +end : String
+        +period : String
+        +text : String
+    }
+    class ApiError {
+        <<data>>
+        +error : String
+        +message : String
+        +fields : Object
+        +capacity : int
+        +total : int
+        +overflow : int
+        +advice : String
+    }
+
+    class Db {
+        <<interface>>
+        +ready : Promise
+        +MODE : String
+        +getDrawRaw(id) : Draw
+        +participants(id) : Participant[]
+        +exportCSV(id) : String
+        +exportAll() : Object
+        +importAll(data) : Object
+    }
+    class DbLocal {
+        <<module>>
+        -all(sql, params) : Row[]
+        -csvCell(s) : String
+    }
+    note for DbLocal "db.js"
+    class DbCloudbase {
+        <<module>>
+        -query(name, where, orderBy, limit) : Row[]
+        -csvCell(s) : String
+    }
+    note for DbCloudbase "db-cloudbase.js"
+
+    class Server {
+        <<module>>
+        +handle(req, res) : Promise
+        +validAdminToken(tok) : bool
+        +handleExportCSV(id, res) : void
+        +handleExportSchedule(id, body, res) : void
+        +send(res, status, obj) : void
+    }
+    note for Server "server.js"
+    class AdminUI {
+        <<module>>
+        -token : String
+        -currentListDrawId : String
+        -currentListDrawTitle : String
+        +renderCard(d) : Element
+        +openList(id) : void
+        +copyLink(id) : void
+        +openSchedule() : void
+        +submitSchedule() : void
+        +openQr(id, title) : void
+        +downloadBlob(blob, filename) : void
+        +toast(msg) : void
+    }
+    note for AdminUI "public/admin.js"
+    class ScheduleFormState {
+        <<store>>
+        +KEY : String
+        +load() : Object
+        +save(params) : void
+    }
+    note for ScheduleFormState "localStorage key = lottery_schedule_params_v1"
+    class QrRenderer {
+        <<module>>
+        +COSMIC_PALETTE : Object
+        +buildMatrix(url) : QrMatrix
+        +render(canvas, url, opts) : void
+        -drawDecorRings(ctx, R) : void
+        -drawModules(ctx, matrix, cx, cy, u, Q) : void
+        -drawFinders(ctx, matrix, cx, cy, u, Q) : void
+        -drawStarfield(ctx, cx, cy, d) : void
+        -drawCircleFrame(ctx, R) : void
+    }
+    note for QrRenderer "public/qr-render.js"
+    class QrVendor {
+        <<vendor>>
+        +qrcode(typeNumber, ecLevel) : QrInstance
+        +stringToBytesFuncs : Object
+    }
+    note for QrVendor "public/vendor/qrcode.js (MIT)"
+    class QrInstance {
+        <<vendor>>
+        +addData(data, mode) : void
+        +make() : void
+        +getModuleCount() : int
+        +isDark(r, c) : bool
+    }
+
+    DbLocal ..|> Db
+    DbCloudbase ..|> Db
+    Server --> Db : 按 DB_DRIVER 选择
+    Server --> ScheduleKit : validate / compute / plan
+    Server --> SpreadsheetML : buildWorkbook
+    Server --> ResultSort : sortRows
+    DbLocal --> ResultSort : exportCSV 排序
+    DbCloudbase --> ResultSort : exportCSV 排序
+    ScheduleKit --> ScheduleParams : 消费
+    ScheduleKit --> Slot : 产出
+    ScheduleKit --> PlanRow : 产出
+    SpreadsheetML --> PlanRow : 渲染
+    AdminUI --> ShareUrl : copyLink / QR 内容
+    AdminUI --> ResultSort : 名单弹窗同序
+    AdminUI --> ScheduleFormState : 读写参数
+    AdminUI --> QrRenderer : render / toDataURL
+    AdminUI --> Server : fetch CSV / xls
+    QrRenderer --> QrVendor : require global qrcode
+    QrVendor --> QrInstance : 创建
+    Server ..> ApiError : 400 响应

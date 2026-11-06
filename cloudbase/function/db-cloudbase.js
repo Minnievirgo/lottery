@@ -18,6 +18,8 @@
 //
 // 文档里 _id 与业务 id 同值并冗余存一份 id，便于 exportAll 与现有备份 JSON 互相兼容。
 const crypto = require('crypto');
+// F1：与 db.js 共用同一份排序 UMD（本文件在云函数里不与 db.js 同时存在，无法互相 require）
+const { sortRows } = require('./public/lib/result-sort');
 
 const MODE = 'cloudbase';
 const USE_MOCK = process.env.CLOUDBASE_MOCK === '1';
@@ -178,7 +180,8 @@ async function listDraws() {
 }
 
 async function participants(drawId) {
-  const rows = await query('participants', { draw_id: drawId }, ['drawn_at', 'desc']);
+  // query() 默认 limit(1000)，显式传 10000 与 db.js 的「无上限」对齐，避免大名单被截断（R4）
+  const rows = await query('participants', { draw_id: drawId }, ['drawn_at', 'desc'], 10000);
   return rows.map(p => ({ id: p.id, name: p.name, resultName: p.result_name, drawnAt: p.drawn_at }));
 }
 
@@ -262,9 +265,12 @@ function csvCell(s) {
   return s;
 }
 async function exportCSV(drawId) {
-  const rows = await query('participants', { draw_id: drawId }, ['drawn_at', 'asc']);
+  // 显式传 limit=10000 消除 query() 默认 limit(1000) 与 db.js 的行为差异（AC-1.7 / R4）。
+  // 排序调用与 db.js 写法完全一致：同为 snake_case 字段名的 accessor。
+  const rows = await query('participants', { draw_id: drawId }, ['drawn_at', 'asc'], 10000);
+  const sorted = sortRows(rows, r => r.result_name, r => r.drawn_at, r => r.id);
   const lines = [['姓名', '抽签结果', '抽签时间'].join(',')];
-  for (const r of rows) {
+  for (const r of sorted) {
     const t = new Date(Number(r.drawn_at)).toLocaleString('zh-CN', { hour12: false });
     lines.push([csvCell(r.name), csvCell(r.result_name), csvCell(t)].join(','));
   }

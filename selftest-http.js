@@ -27,7 +27,10 @@ async function call(method, pathname, body, headers = {}) {
   const r = res.toResult();
   let json = null;
   try { json = JSON.parse(r.body); } catch (_) { /* 非 JSON */ }
-  return { status: r.statusCode, headers: r.headers, body: r.body, json };
+  return {
+    status: r.statusCode, headers: r.headers, body: r.body, json,
+    isBase64Encoded: r.isBase64Encoded
+  };
 }
 
 (async () => {
@@ -87,6 +90,54 @@ async function call(method, pathname, body, headers = {}) {
   assert.equal(csv.status, 200, 'CSV 200');
   assert.ok(csv.body.startsWith('\ufeff姓名,抽签结果,抽签时间'), 'CSV BOM 与表头');
   assert.ok(csv.body.includes('张三'), 'CSV 含姓名');
+
+  // 7b. 新增 POST /api/admin/draws/:id/export-schedule（AC-2.x / CloudBase base64 桥接）
+  const SCH = {
+    title: 'HTTP 发言顺序', amStart: '08:40', amEnd: '12:00',
+    pmStart: '14:00', pmEnd: '17:30', duration: 10, gap: 5,
+    breakEnabled: true, breakEvery: 7, breakMinutes: 15, remark: '备注冒烟'
+  };
+  const schPath = `/api/admin/draws/${id}/export-schedule`;
+  const sch = await call('POST', schPath, SCH, auth);
+  assert.equal(sch.status, 200, 'export-schedule 200');
+  assert.equal(sch.headers['Content-Type'], 'application/vnd.ms-excel', 'MIME 严格不带 charset');
+  assert.ok(sch.headers['Content-Disposition'].includes("filename*=UTF-8''"), 'RFC6266 双形式');
+  const xml = sch.isBase64Encoded ? Buffer.from(sch.body, 'base64').toString('utf8') : sch.body;
+  assert.ok(xml.startsWith('<?xml version="1.0" encoding="UTF-8"?>'), 'XML 声明');
+  assert.ok(xml.includes('<?mso-application progid="Excel.Sheet"?>'), 'ProgID 紧跟 XML 声明');
+  assert.ok(xml.includes('08:40'), '首位开始时间单元格');
+  assert.ok(xml.includes('张三'), '姓名单元格');
+  assert.ok(xml.includes('ss:MergeAcross="6"'), '整行合并');
+  if (process.env.DB_DRIVER === 'cloudbase') {
+    // http-bridge.js:68-74 把 application/vnd.ms-excel 判为非文本 → base64，属正确行为
+    assert.equal(sch.isBase64Encoded, true, 'CloudBase 桥接应走 base64');
+    assert.ok(Buffer.from(sch.body, 'base64').toString('utf8').startsWith('<?xml'),
+      'base64 解码后以 <?xml 开头');
+  }
+
+  const badSch = await call('POST', schPath, Object.assign({}, SCH, { duration: 0 }), auth);
+  assert.equal(badSch.status, 400, 'duration=0 应 400');
+  assert.equal(badSch.json.error, 'invalid_params', 'invalid_params');
+  assert.ok(badSch.json.fields && badSch.json.fields.duration, '字段级中文提示');
+
+  const over = await call('POST', schPath, Object.assign({}, SCH, {
+    amEnd: '08:41', pmStart: '08:42', pmEnd: '08:43', duration: 600
+  }), auth);
+  assert.equal(over.status, 400, '超容量应 400 且不生成文件');
+  assert.equal(over.json.error, 'capacity_exceeded', 'capacity_exceeded');
+  assert.ok(Number.isInteger(over.json.capacity) && Number.isInteger(over.json.total) &&
+    Number.isInteger(over.json.overflow), 'capacity/total/overflow 齐全');
+  assert.ok(over.json.message.includes('最多可安排'), '中文容量提示');
+
+  const emptyDraw = await call('POST', '/api/admin/draws',
+    { title: '空名单自检', items: [{ name: 'X', limit: -1 }] }, auth);
+  const noPart = await call('POST', `/api/admin/draws/${emptyDraw.json.draw.id}/export-schedule`, SCH, auth);
+  assert.equal(noPart.status, 400, '空名单应 400');
+  assert.equal(noPart.json.error, 'no_participants', 'no_participants');
+
+  assert.equal((await call('POST', schPath, SCH, {})).status, 401, '新接口必须鉴权');
+  assert.equal((await call('POST', '/api/admin/draws/NO_SUCH_ID/export-schedule', SCH, auth)).status, 404,
+    '不存在的场次应 404');
 
   // 8. 短链 302
   const short = await call('GET', `/d/${id}`);

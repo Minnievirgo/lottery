@@ -1,0 +1,94 @@
+sequenceDiagram
+    autonumber
+    actor U as 管理员
+    participant A as AdminUI (admin.js)
+    participant RS as ResultSort
+    participant SU as ShareUrl
+    participant S as Server (server.js)
+    participant DB as Db (db.js / db-cloudbase.js)
+    participant SK as ScheduleKit
+    participant XL as SpreadsheetML
+    participant QR as QrRenderer
+    participant V as QrVendor (window.qrcode)
+    participant FS as 浏览器下载
+
+    rect rgb(18, 30, 62)
+    Note over U,FS: 链路一 · F1 导出 CSV（按抽签结果升序）
+    U->>A: 点击卡片「名单」
+    A->>S: GET /api/admin/draws/{id}/participants (x-admin-token)
+    S->>DB: participants(id)
+    DB-->>A: [{id,name,resultName,drawnAt}] (drawn_at DESC)
+    A->>RS: sortRows(list, p=>resultName, p=>drawnAt, p=>id)
+    RS-->>A: 结果升序后的新数组（P1-1 弹窗同序）
+    A-->>U: 渲染参与名单表格 + 底部「导出 CSV」
+    U->>A: 点击「导出 CSV」
+    A->>S: GET /api/admin/draws/{id}/export (x-admin-token)
+    S->>S: validAdminToken 通过
+    S->>DB: exportCSV(id)
+    DB->>DB: all/query 取原始行（含 id）
+    DB->>RS: sortRows(rows, r=>result_name, r=>drawn_at, r=>id)
+    RS-->>DB: 5,6,13,14,17,38,43 ... 非数字 ... 空值
+    DB-->>S: '\ufeff姓名,抽签结果,抽签时间\r\n...'
+    S-->>A: 200 text/csv; charset=utf-8 + filename="<title>-名单.csv"
+    A->>FS: blob -> a.download='名单.csv' -> click
+    end
+
+    rect rgb(20, 40, 58)
+    Note over U,FS: 链路二 · F2 导出发言顺序 .xls
+    U->>A: 名单弹窗底部点击「导出发言顺序」
+    A->>A: 校验名单非空；ScheduleFormState.load() 合并 DEFAULTS；title 注入 currentListDrawTitle
+    A-->>U: 打开 #scheduleModal（11 字段，3 组）
+    U->>A: 修改字段 / 点击「生成并下载 .xls」
+    A->>A: 字段级即时校验 + 提交全量校验（duration>0, gap>=0, 时段先后）
+    A->>S: POST /api/admin/draws/{id}/export-schedule (x-admin-token, JSON)
+    S->>S: validAdminToken 通过 -> readBody
+    S->>SK: validateParams(body)
+    alt 参数非法
+        SK-->>S: {ok:false, fields}
+        S-->>A: 400 {error:'invalid_params', message, fields}
+        A-->>U: 字段标红 + toast；弹窗保持打开
+    else 参数合法
+        SK-->>S: {ok:true, params}
+        S->>DB: getDrawRaw(id) / participants(id)
+        DB-->>S: 参与者列表（camelCase）
+        S->>RS: sortRows(parts, p=>resultName, p=>drawnAt, p=>id)
+        RS-->>S: 与 CSV 完全同序
+        S->>SK: computeSlots(sorted, params) -> buildPlan(slots, params)
+        alt 容量超限 (Z>0)
+            SK-->>S: {ok:false, capacity:X, total:Y, overflow:Z, advice}
+            S-->>A: 400 {error:'capacity_exceeded', message:'最多 X 人 / 当前 Y 人 / 超出 Z 人…'}
+            A-->>U: #schError 展示完整提示；不产生下载
+        else 可排
+            SK-->>S: PlanRow[]（person / break / lunch / remark）
+            S->>XL: buildWorkbook(plan, params)
+            XL->>XL: mergeRuns -> buildStyles -> buildRows -> 拼接 XMLSS
+            XL-->>S: UTF-8 XML 字符串
+            S-->>A: 200 application/vnd.ms-excel + RFC6266 双形式 Content-Disposition
+            A->>FS: blob -> a.download='<title>-发言顺序.xls' -> click
+            A->>A: ScheduleFormState.save(10 个非 title 字段)
+            A-->>U: toast('发言顺序表已下载')；关闭弹窗
+        end
+    end
+    end
+
+    rect rgb(40, 24, 58)
+    Note over U,FS: 链路三 · F3 生成 / 复制 / 下载分享二维码
+    U->>A: 点击卡片第 7 个按钮「二维码」
+    A->>SU: makeShareUrl(location.origin, drawId)
+    SU-->>A: "<origin>/?d=<encodeURIComponent(id)>"
+    A->>QR: render(#qrCanvas, url, {size:800})
+    QR->>V: qrcode(0,'H') + stringToBytes=UTF-8 + addData(url,'Byte') + make()
+    V-->>QR: QrInstance (getModuleCount / isDark)
+    QR->>QR: 白色圆底 -> 装饰同心圆环(外圈带) -> 全模块圆点 + 标准 7x7 finder -> 白晕 -> 星空离屏帧 -> 圆形描边
+    QR-->>A: 800x800 Canvas（CSS 显示 240px）
+    A->>A: #qrUrl.textContent = 同一 url
+    A-->>U: 打开 #qrModal，展示二维码 + 完整链接
+    U->>A: 点击「复制链接」
+    A->>SU: makeShareUrl(location.origin, drawId)
+    SU-->>A: 与二维码内容逐字符相同的 url
+    A->>A: navigator.clipboard.writeText(url) / 失败降级 prompt
+    A-->>U: toast('分享链接已复制：' + url)
+    U->>A: 点击「下载二维码 PNG」
+    A->>QR: canvas.toDataURL('image/png')
+    A->>FS: a.download='<title>-二维码.png' -> click（无网络请求）
+    end

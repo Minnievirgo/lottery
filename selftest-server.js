@@ -98,6 +98,22 @@ async function runMode(label, port, extraEnv) {
     assert.equal(stats.status, 200, label + ': 统计');
     const csv = await req('GET', base + '/api/admin/draws/' + encodeURIComponent(id) + '/export', undefined, H);
     assert.ok(String(csv.data).includes(','), label + ': CSV 导出');
+
+    // 新增：export-schedule 真实 HTTP 冒烟（成功 200 + 非法参数 400），local / turso 两种模式都跑
+    const SCH = {
+      title: '冒烟发言顺序', amStart: '08:40', amEnd: '12:00',
+      pmStart: '14:00', pmEnd: '17:30', duration: 10, gap: 5,
+      breakEnabled: true, breakEvery: 7, breakMinutes: 15, remark: '冒烟备注'
+    };
+    const schUrl = base + '/api/admin/draws/' + encodeURIComponent(id) + '/export-schedule';
+    const sch = await req('POST', schUrl, SCH, H);
+    assert.equal(sch.status, 200, label + ': export-schedule 200');
+    assert.ok(String(sch.data).startsWith('<?xml'), label + ': export-schedule XML 头');
+    assert.ok(String(sch.data).includes('08:40'), label + ': export-schedule 首位时间');
+    const schBad = await req('POST', schUrl, Object.assign({}, SCH, { duration: 0 }), H);
+    assert.equal(schBad.status, 400, label + ': export-schedule 非法参数 400');
+    assert.equal(schBad.data.error, 'invalid_params', label + ': export-schedule invalid_params');
+
     const backup = await req('GET', base + '/api/admin/backup', undefined, H);
     assert.ok(Array.isArray(backup.data.draws), label + ': 完整备份');
 

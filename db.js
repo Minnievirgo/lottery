@@ -7,6 +7,8 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+// F1：名单导出排序的唯一实现（与 db-cloudbase.js / server.js / admin.js 共用同一份 UMD）
+const { sortRows } = require('./public/lib/result-sort');
 
 const TURSO_URL = process.env.TURSO_URL || '';
 const TURSO_TOKEN = process.env.TURSO_TOKEN || '';
@@ -283,9 +285,12 @@ function csvCell(s) {
   return s;
 }
 async function exportCSV(drawId) {
-  const rows = await all(`SELECT name,result_name,drawn_at FROM participants WHERE draw_id=? ORDER BY drawn_at`, [drawId]);
+  // id 仅作 sortRows 的末级稳定兜底键，不输出；ORDER BY drawn_at 仅作 SQL 层稳定兜底，
+  // 真正决定顺序的是结果升序纯函数（数值 → 同值时间 → 非数字 → 空值 → id）。
+  const rows = await all(`SELECT id,name,result_name,drawn_at FROM participants WHERE draw_id=? ORDER BY drawn_at`, [drawId]);
+  const sorted = sortRows(rows, r => r.result_name, r => r.drawn_at, r => r.id);
   const lines = [['姓名', '抽签结果', '抽签时间'].join(',')];
-  for (const r of rows) {
+  for (const r of sorted) {
     const t = new Date(Number(r.drawn_at)).toLocaleString('zh-CN', { hour12: false });
     lines.push([csvCell(r.name), csvCell(r.result_name), csvCell(t)].join(','));
   }

@@ -94,6 +94,7 @@
       </div>
       <div class="modal-foot">
         <button class="btn-ghost" data-close>关闭</button>
+        <button class="btn-primary" id="scheduleBtn">导出发言顺序</button>
         <button class="btn-primary" id="exportBtn">导出 CSV</button>
       </div>
     </div>
@@ -111,8 +112,70 @@
     </div>
   </div>
 
+  <!-- 弹窗：导出发言顺序（11 个字段，3 组）-->
+  <div class="modal hidden" id="scheduleModal">
+    <div class="modal-box wide">
+      <div class="modal-head"><h3>导出发言顺序</h3><button class="x" data-close>×</button></div>
+      <div class="modal-body">
+        <div class="form-error hidden" id="schError"></div>
+
+        <fieldset class="fld-group"><legend>时段设置</legend>
+          <div class="fld-grid">
+            <label class="fld">上午开始 <input id="sch_amStart" type="time" value="08:40"><span class="fld-msg"></span></label>
+            <label class="fld">上午结束 <input id="sch_amEnd" type="time" value="12:00"><span class="fld-msg"></span></label>
+            <label class="fld">下午开始 <input id="sch_pmStart" type="time" value="14:00"><span class="fld-msg"></span></label>
+            <label class="fld">下午结束 <input id="sch_pmEnd" type="time" value="17:30"><span class="fld-msg"></span></label>
+          </div>
+        </fieldset>
+
+        <fieldset class="fld-group"><legend>节奏设置</legend>
+          <div class="fld-grid">
+            <label class="fld">每人发言时长（分钟） <input id="sch_duration" type="number" min="1" step="1" value="10"><span class="fld-msg"></span></label>
+            <label class="fld">每人发言间隔（分钟） <input id="sch_gap" type="number" min="0" step="1" value="5"><span class="fld-msg"></span></label>
+          </div>
+          <label class="fld row"><span>启用课间休息</span><input id="sch_breakEnabled" type="checkbox" checked></label>
+          <div class="fld-grid" id="sch_breakFields">
+            <label class="fld">每 N 人休息 <input id="sch_breakEvery" type="number" min="1" step="1" value="7"><span class="fld-msg"></span></label>
+            <label class="fld">休息 M 分钟 <input id="sch_breakMinutes" type="number" min="0" step="1" value="15"><span class="fld-msg"></span></label>
+          </div>
+        </fieldset>
+
+        <fieldset class="fld-group"><legend>表格内容</legend>
+          <label class="fld">表格标题 <input id="sch_title" type="text" maxlength="60"><span class="fld-msg"></span></label>
+          <label class="fld">备注（≤200 字）<textarea id="sch_remark" rows="3" maxlength="200">1、个人答辩时长每人13分钟，其中报告呈现10分钟，评委提问3分钟。</textarea><span class="fld-msg"></span></label>
+          <p class="tip">示例备注写「13 分钟」，排程时长为 10 分钟，属示例固有不一致；可自行改写。「日期 / 分公司」两列在表中留空供打印后填写。</p>
+        </fieldset>
+      </div>
+      <div class="modal-foot">
+        <button class="btn-ghost" data-close>取消</button>
+        <button class="btn-primary" id="schSubmit">生成并下载 .xls</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 弹窗：分享二维码 -->
+  <div class="modal hidden" id="qrModal">
+    <div class="modal-box qr-box">
+      <div class="modal-head"><h3>分享二维码</h3><button class="x" data-close>×</button></div>
+      <div class="modal-body qr-body">
+        <canvas id="qrCanvas" width="800" height="800" class="qr-canvas"></canvas>
+        <div class="qr-url" id="qrUrl" title="点击可全选复制"></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn-ghost" id="qrCopyBtn">复制链接</button>
+        <button class="btn-primary" id="qrDownloadBtn">下载二维码 PNG</button>
+        <button class="btn-ghost" data-close>关闭</button>
+      </div>
+    </div>
+  </div>
+
   <div class="toast hidden" id="toast"></div>
+  <!-- 加载顺序不可乱：ResultSort / ShareUrl / qrcode / LotteryQR 必须先于 admin.js -->
   <script src="/cosmic-bg.js"></script>
+  <script src="/lib/result-sort.js"></script>
+  <script src="/lib/share-url.js"></script>
+  <script src="/vendor/qrcode.js"></script>
+  <script src="/qr-render.js"></script>
   <script src="/admin.js"></script>
 </body>
 </html>

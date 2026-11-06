@@ -3,8 +3,30 @@
   const token = localStorage.getItem('lottery_token') || '';
   let editingId = null;
   let currentListDrawId = null;
+  let currentListDrawTitle = '';
+  let currentListEmpty = true;
+  let currentQrDrawId = null;
+  let currentQrDrawTitle = '';
 
   const PALETTE = ['#22d3ee', '#a855f7', '#34d399', '#fbbf24', '#f87171', '#60a5fa', '#f472b6', '#2dd4bf'];
+
+  // P1-2：仅当前浏览器记忆 10 个非 title 字段；title 每次打开由当前场次重新注入，
+  // 不写入 localStorage，避免切换场次显示旧标题（与 lottery_token 同风格）。
+  const SCH_KEY = 'lottery_schedule_params_v1';
+  const SCH_DEFAULTS = Object.freeze({
+    amStart: '08:40', amEnd: '12:00', pmStart: '14:00', pmEnd: '17:30',
+    duration: 10, gap: 5, breakEnabled: true, breakEvery: 7, breakMinutes: 15,
+    remark: '1、个人答辩时长每人13分钟，其中报告呈现10分钟，评委提问3分钟。'
+  });
+  const SCH_TIME_KEYS = ['amStart', 'amEnd', 'pmStart', 'pmEnd'];
+  const SCH_INT_KEYS = ['duration', 'gap', 'breakEvery', 'breakMinutes'];
+  const SCH_ALL_KEYS = SCH_TIME_KEYS.concat(SCH_INT_KEYS, ['breakEnabled', 'remark']);
+  const SCH_FIELD_IDS = {
+    title: 'sch_title', amStart: 'sch_amStart', amEnd: 'sch_amEnd',
+    pmStart: 'sch_pmStart', pmEnd: 'sch_pmEnd',
+    duration: 'sch_duration', gap: 'sch_gap',
+    breakEvery: 'sch_breakEvery', breakMinutes: 'sch_breakMinutes', remark: 'sch_remark'
+  };
 
   function api(path, opts = {}) {
     opts.headers = Object.assign({ 'Content-Type': 'application/json', 'x-admin-token': token }, opts.headers || {});
@@ -71,13 +93,15 @@
         <button data-act="stat">统计</button>
         <button data-act="toggle">${open ? '结束' : '开启'}</button>
         <button data-act="link">复制链接</button>
+        <button data-act="qr">二维码</button>
         <button data-act="del" style="color:var(--danger)">删除</button>
       </div>`;
     el.querySelector('[data-act=edit]').onclick = () => openEdit(d);
-    el.querySelector('[data-act=list]').onclick = () => openList(d.id);
+    el.querySelector('[data-act=list]').onclick = () => openList(d.id, d.title);
     el.querySelector('[data-act=stat]').onclick = () => openStat(d.id);
     el.querySelector('[data-act=toggle]').onclick = () => toggleDraw(d.id, open);
     el.querySelector('[data-act=link]').onclick = () => copyLink(d.id);
+    el.querySelector('[data-act=qr]').onclick = () => openQr(d.id, d.title);
     el.querySelector('[data-act=del]').onclick = () => delDraw(d.id);
     return el;
   }
@@ -177,19 +201,33 @@
     api('/api/admin/draws/' + id, { method: 'DELETE' }).then(() => { toast('已删除'); loadDraws(); });
   }
   function copyLink(id) {
-    const url = location.origin + '/?d=' + encodeURIComponent(id);
+    // 卡片「复制链接」、二维码弹窗「复制链接」、二维码内容、弹窗链接文本共用同一来源
+    const url = ShareUrl.makeShareUrl(location.origin, id);
     navigator.clipboard.writeText(url).then(() => toast('分享链接已复制：' + url),
       () => { prompt('复制以下链接发给用户：', url); });
   }
 
   // ---- 名单 ----
-  function openList(id) {
+  function setExportButtonsEnabled(ok) {
+    // 不用原生 disabled（那样点击无任何反馈）：用 .disabled 置灰 + 点击时 toast 提示，
+    // 同时满足 AC-2.13「名单为空时禁用」与「点击给出提示」两条。
+    ['exportBtn', 'scheduleBtn'].forEach(k => {
+      const b = $(k);
+      if (ok) b.classList.remove('disabled'); else b.classList.add('disabled');
+    });
+  }
+  function openList(id, title) {
     currentListDrawId = id;
+    currentListDrawTitle = String(title || '');
     api('/api/admin/draws/' + id + '/participants').then(res => {
       const tb = $('listTbl').querySelector('tbody'); tb.innerHTML = '';
       const list = res.participants || [];
-      $('listEmpty').classList.toggle('hidden', list.length > 0);
-      list.forEach(p => {
+      // P1-1：与导出 CSV / .xls 同序（同一份 ResultSort.sortRows，camelCase accessor）
+      const sorted = ResultSort.sortRows(list, p => p.resultName, p => p.drawnAt, p => p.id);
+      currentListEmpty = sorted.length === 0;
+      $('listEmpty').classList.toggle('hidden', !currentListEmpty);
+      setExportButtonsEnabled(!currentListEmpty);
+      sorted.forEach(p => {
         const tr = document.createElement('tr');
         tr.innerHTML = `<td>${escapeHtml(p.name)}</td><td>${escapeHtml(p.resultName)}</td><td>${new Date(p.drawnAt).toLocaleString('zh-CN', { hour12: false })}</td>`;
         tb.appendChild(tr);
@@ -198,6 +236,7 @@
     });
   }
   $('exportBtn').onclick = () => {
+    if (currentListEmpty) { toast('暂无参与记录'); return; }
     if (!currentListDrawId) return;
     fetch('/api/admin/draws/' + currentListDrawId + '/export', { headers: { 'x-admin-token': token } })
       .then(r => r.blob())
@@ -232,4 +271,222 @@
       openModal('statModal');
     });
   }
+
+  // ================= F2：导出发言顺序 =================
+  const ScheduleFormState = {
+    load() {
+      const out = Object.assign({}, SCH_DEFAULTS);
+      try {
+        const raw = JSON.parse(localStorage.getItem(SCH_KEY) || 'null');
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+        // 逐字段类型校验后与 DEFAULTS 合并，任何非法值静默回退（R7）
+        for (const k of SCH_TIME_KEYS) {
+          const v = raw[k];
+          if (typeof v === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(v)) out[k] = v;
+        }
+        for (const k of SCH_INT_KEYS) {
+          const v = raw[k];
+          if (Number.isInteger(v) && v >= 0) out[k] = v;
+          else if (typeof v === 'string' && /^[+-]?\d+$/.test(v.trim()) && Number(v) >= 0) out[k] = Number(v);
+        }
+        if (typeof raw.breakEnabled === 'boolean') out.breakEnabled = raw.breakEnabled;
+        if (typeof raw.remark === 'string' && raw.remark.length <= 200) out.remark = raw.remark;
+      } catch (_) { /* 脏值 / 隐私模式：静默回退默认 */ }
+      return out;
+    },
+    save(params) {
+      const out = {};
+      SCH_ALL_KEYS.forEach(k => { out[k] = params[k]; });
+      // 数字字段统一存成整数，避免读回时类型漂移；仅 10 个字段，不含 title / drawId
+      SCH_INT_KEYS.forEach(k => {
+        const n = parseInt(out[k], 10);
+        if (Number.isFinite(n)) out[k] = n;
+      });
+      try { localStorage.setItem(SCH_KEY, JSON.stringify(out)); } catch (_) {}
+    }
+  };
+
+  // 原样读回字符串，让服务端 validateParams 也能严格拦截空值 / 0 / 负数
+  function readScheduleForm() {
+    return {
+      title: $('sch_title').value,
+      amStart: $('sch_amStart').value,
+      amEnd: $('sch_amEnd').value,
+      pmStart: $('sch_pmStart').value,
+      pmEnd: $('sch_pmEnd').value,
+      duration: $('sch_duration').value,
+      gap: $('sch_gap').value,
+      breakEnabled: $('sch_breakEnabled').checked,
+      breakEvery: $('sch_breakEvery').value,
+      breakMinutes: $('sch_breakMinutes').value,
+      remark: $('sch_remark').value
+    };
+  }
+
+  function localParseHHmm(s) {
+    const m = /^([01]\d|2[0-3]):[0-5]\d$/.exec(String(s == null ? '' : s));
+    return m ? parseInt(m[1], 10) * 60 + parseInt(m[2], 10) : NaN;
+  }
+  function localToInt(v) {
+    if (typeof v === 'number') return Number.isInteger(v) ? v : NaN;
+    if (typeof v === 'string' && /^[+-]?\d+$/.test(v.trim())) return parseInt(v.trim(), 10);
+    return NaN;
+  }
+  // 与服务端 schedule.validateParams 同规则的前端镜像；服务端仍是权威
+  function validateLocal(p) {
+    const f = {};
+    const title = String(p.title || '').trim();
+    if (!title) f.title = '请填写表格标题';
+    else if (title.length > 60) f.title = '表格标题不能超过 60 字';
+    const mins = {};
+    const labels = { amStart: '上午开始', amEnd: '上午结束', pmStart: '下午开始', pmEnd: '下午结束' };
+    for (const k of SCH_TIME_KEYS) {
+      const n = localParseHHmm(p[k]);
+      if (isNaN(n)) f[k] = labels[k] + '时间格式不合法（需 HH:mm）';
+      mins[k] = n;
+    }
+    if (isFinite(mins.amStart) && isFinite(mins.amEnd) && !(mins.amEnd > mins.amStart)) f.amEnd = '上午结束时间必须晚于上午开始时间';
+    if (isFinite(mins.amEnd) && isFinite(mins.pmStart) && !(mins.pmStart > mins.amEnd)) f.pmStart = '下午开始时间必须晚于上午结束时间';
+    if (isFinite(mins.pmStart) && isFinite(mins.pmEnd) && !(mins.pmEnd > mins.pmStart)) f.pmEnd = '下午结束时间必须晚于下午开始时间';
+    const d = localToInt(p.duration);
+    if (isNaN(d) || d <= 0) f.duration = '每人发言时长必须大于 0 分钟';
+    const g = localToInt(p.gap);
+    if (isNaN(g) || g < 0) f.gap = '发言间隔不能为负数';
+    if (p.breakEnabled) {
+      const n = localToInt(p.breakEvery);
+      const m = localToInt(p.breakMinutes);
+      if (isNaN(n) || n < 1) f.breakEvery = '每 N 人休息必须是 ≥ 1 的整数';
+      if (isNaN(m) || m < 0) f.breakMinutes = '休息分钟数必须是 ≥ 0 的整数';
+    }
+    if (String(p.remark || '').length > 200) f.remark = '备注不能超过 200 字';
+    return f;
+  }
+
+  function markField(key, msg) {
+    const input = $(SCH_FIELD_IDS[key]);
+    if (!input) return;
+    const fld = input.closest('.fld');
+    const span = fld ? fld.querySelector('.fld-msg') : null;
+    if (msg) {
+      if (fld) fld.classList.add('err');
+      if (span) span.textContent = msg;
+    } else {
+      if (fld) fld.classList.remove('err');
+      if (span) span.textContent = '';
+    }
+  }
+  function clearFieldErrors() { Object.keys(SCH_FIELD_IDS).forEach(k => markField(k, '')); }
+  function applyFieldErrors(fields) {
+    clearFieldErrors();
+    let first = '';
+    Object.keys(fields || {}).forEach(k => {
+      markField(k, fields[k]);
+      if (!first) first = fields[k];
+    });
+    return first;
+  }
+  function liveValidate(key) {
+    const f = validateLocal(readScheduleForm());
+    markField(key, f[key] || '');
+  }
+  Object.keys(SCH_FIELD_IDS).forEach(k => {
+    const el = $(SCH_FIELD_IDS[k]);
+    if (!el) return;
+    el.addEventListener('input', () => liveValidate(k));
+    el.addEventListener('change', () => liveValidate(k));
+  });
+  function syncBreakFields() {
+    const on = $('sch_breakEnabled').checked;
+    $('sch_breakFields').classList.toggle('disabled', !on);
+    $('sch_breakEvery').disabled = !on;
+    $('sch_breakMinutes').disabled = !on;
+    if (!on) { markField('breakEvery', ''); markField('breakMinutes', ''); }
+  }
+  $('sch_breakEnabled').addEventListener('change', syncBreakFields);
+
+  function openSchedule() {
+    if (currentListEmpty) { toast('暂无参与记录'); return; }
+    if (!currentListDrawId) return;
+    const saved = ScheduleFormState.load();
+    SCH_TIME_KEYS.forEach(k => { $(SCH_FIELD_IDS[k]).value = saved[k]; });
+    SCH_INT_KEYS.forEach(k => { $(SCH_FIELD_IDS[k]).value = saved[k]; });
+    $('sch_breakEnabled').checked = saved.breakEnabled;
+    $('sch_remark').value = saved.remark;
+    // title 不存 localStorage：每次打开取当前场次标题，切换场次自动刷新
+    $('sch_title').value = currentListDrawTitle;
+    clearFieldErrors();
+    $('schError').textContent = '';
+    $('schError').classList.add('hidden');
+    syncBreakFields();
+    openModal('scheduleModal');
+  }
+  $('scheduleBtn').onclick = openSchedule;
+
+  function showSchError(e) {
+    const box = $('schError');
+    box.textContent = (e && e.message) ? e.message : '导出失败，请稍后重试';
+    box.classList.remove('hidden');
+    if (e && e.fields) {
+      const first = applyFieldErrors(e.fields);
+      if (first) toast(first);
+    }
+    // 容量超限 / 参数非法：不关闭弹窗，用户可就地调整参数重试
+  }
+  function submitSchedule() {
+    if (currentListEmpty) { toast('暂无参与记录'); return; }
+    const params = readScheduleForm();
+    const first = applyFieldErrors(validateLocal(params));
+    if (first) { toast(first); return; }
+    $('schError').classList.add('hidden');
+    fetch('/api/admin/draws/' + encodeURIComponent(currentListDrawId) + '/export-schedule', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-admin-token': token },
+      body: JSON.stringify(params)
+    }).then(async r => {
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({}));
+        showSchError(e);
+        return;
+      }
+      const b = await r.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(b);
+      const safeTitle = String(params.title).trim().replace(/["\\\/:*?<>|]/g, '');
+      a.download = safeTitle + '-发言顺序.xls';
+      a.click();
+      URL.revokeObjectURL(a.href);
+      ScheduleFormState.save(params);   // 仅成功导出后写，且只存 10 个字段
+      toast('发言顺序表已下载');
+      closeModal($('scheduleModal'));
+    }).catch(() => showSchError({ message: '导出失败，请检查网络或重新登录' }));
+  }
+  $('schSubmit').onclick = submitSchedule;
+
+  // ================= F3：分享二维码 =================
+  function openQr(id, title) {
+    currentQrDrawId = id;
+    currentQrDrawTitle = String(title || '');
+    const url = ShareUrl.makeShareUrl(location.origin, id);
+    try {
+      LotteryQR.render($('qrCanvas'), url, { size: 800 });
+      $('qrUrl').textContent = url;
+      openModal('qrModal');
+    } catch (e) {
+      toast('二维码生成失败：' + (e && e.message ? e.message : '未知错误'));
+    }
+  }
+  $('qrCopyBtn').onclick = () => { if (currentQrDrawId) copyLink(currentQrDrawId); };
+  $('qrDownloadBtn').onclick = () => {
+    const a = document.createElement('a');
+    a.href = LotteryQR.toDataURL($('qrCanvas'));
+    a.download = (currentQrDrawTitle || '抽签') + '-二维码.png';
+    a.click();
+  };
+  $('qrUrl').onclick = () => {
+    const sel = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents($('qrUrl'));
+    sel.removeAllRanges();
+    sel.addRange(range);
+  };
 })();
