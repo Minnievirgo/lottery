@@ -25,7 +25,7 @@ services:
         sync: false          # 管理后台密码，务必自己设一个强的
       - key: TURSO_URL
         # 数据库地址非敏感，直接固化，避免面板里误把变量名当值填入导致 URL_INVALID
-        value: libsql://draw-lots-minnie.aws-ap-southeast-1.turso.io
+        value: libsql://draw-lots-minnie-minnievirgo.aws-ap-southeast-1.turso.io
       - key: TURSO_TOKEN
         sync: false          # Turso auth token
       - key: DATA_DIR
