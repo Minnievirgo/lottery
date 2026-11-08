@@ -5,6 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>抽签管理后台</title>
   <link rel="stylesheet" href="/admin.css" />
+  <!-- 对外分享地址（可选，v9 配置位）。
+       留空 = 沿用当前页面 origin（线上正常行为，零回归）。
+       本机从 localhost 打开后台时若留空，二维码会把 localhost 编进去、手机扫了打不开；
+       故本地开发自动改用局域网地址，手机连同一 WiFi 即可访问。
+       换网络后 IP 会变：把下面的 IP 改成新地址，或直接用该 IP 打开后台。
+       部署到公网后本分支不生效（hostname 不是 localhost），无需改动。
+       如已绑定正式域名，把完整 origin 填进引号即可覆盖上述逻辑。 -->
+  <script>
+    window.LOTTERY_SHARE_ORIGIN =
+      /^(localhost|127\.0\.0\.1)$/i.test(location.hostname)
+        ? 'http://192.168.1.6:3000'
+        : '';
+  </script>
 </head>
 <body>
   <!-- 宇宙星系 + 星空背景（与用户页共用）-->
@@ -160,6 +173,8 @@
       <div class="modal-body qr-body">
         <canvas id="qrCanvas" width="800" height="800" class="qr-canvas"></canvas>
         <div class="qr-url" id="qrUrl" title="点击可全选复制"></div>
+        <button class="btn-ghost qr-mode-btn" id="qrModeBtn" type="button">改用标准黑白码</button>
+        <div class="qr-tip">真机扫不出时点上面切换，黑白码最易识别；链接内容不变</div>
       </div>
       <div class="modal-foot">
         <button class="btn-ghost" id="qrCopyBtn">复制链接</button>

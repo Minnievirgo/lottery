@@ -214,6 +214,9 @@ fieldset.fld-group legend { padding: 0 8px; font-size: 13px; color: var(--blue);
   user-select: all; -webkit-user-select: all; word-break: break-all;
   font-size: 12px; color: var(--muted); cursor: pointer; line-height: 1.5;
 }
+/* 真机兜底：一键切换标准黑白码 */
+.qr-mode-btn { margin-top: 12px; font-size: 12px; padding: 6px 12px; }
+.qr-tip { font-size: 11px; color: var(--muted); margin-top: 6px; line-height: 1.5; }
 
 /* 第 7 个「二维码」按钮：青蓝描边强调 */
 .dc-actions button[data-act=qr] { color: var(--blue); border-color: rgba(90,209,255,.55); }

@@ -7,6 +7,9 @@
   let currentListEmpty = true;
   let currentQrDrawId = null;
   let currentQrDrawTitle = '';
+  // 真机扫不出装饰版时的一键兜底：切到标准黑白码，并在本机记住选择（下次打开仍生效）。
+  let currentQrPlain = false;
+  try { currentQrPlain = localStorage.getItem('lottery_qr_plain') === '1'; } catch (e) { /* 隐私模式忽略 */ }
 
   const PALETTE = ['#22d3ee', '#a855f7', '#34d399', '#fbbf24', '#f87171', '#60a5fa', '#f472b6', '#2dd4bf'];
 
@@ -324,7 +327,8 @@
   }
 
   function localParseHHmm(s) {
-    const m = /^([01]\d|2[0-3]):[0-5]\d$/.exec(String(s == null ? '' : s));
+    // 分钟必须是第二个捕获组 m[2]；漏写括号会让所有时间恒判非法（NaN）。
+    const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(String(s == null ? '' : s));
     return m ? parseInt(m[1], 10) * 60 + parseInt(m[2], 10) : NaN;
   }
   function localToInt(v) {
@@ -463,23 +467,39 @@
   $('schSubmit').onclick = submitSchedule;
 
   // ================= F3：分享二维码 =================
+  // 两种模式共用同一条 URL：星空美化版（定稿视觉）/ 标准黑白码（真机兜底）。
+  function renderQr() {
+    const url = ShareUrl.makeShareUrl(location.origin, currentQrDrawId);
+    LotteryQR.render($('qrCanvas'), url, { size: 800, plain: currentQrPlain });
+    $('qrUrl').textContent = url;
+    $('qrModeBtn').textContent = currentQrPlain ? '改用星空美化版' : '改用标准黑白码';
+  }
   function openQr(id, title) {
     currentQrDrawId = id;
     currentQrDrawTitle = String(title || '');
-    const url = ShareUrl.makeShareUrl(location.origin, id);
     try {
-      LotteryQR.render($('qrCanvas'), url, { size: 800 });
-      $('qrUrl').textContent = url;
+      renderQr();
       openModal('qrModal');
     } catch (e) {
       toast('二维码生成失败：' + (e && e.message ? e.message : '未知错误'));
     }
   }
+  $('qrModeBtn').onclick = () => {
+    if (!currentQrDrawId) return;
+    currentQrPlain = !currentQrPlain;
+    try { localStorage.setItem('lottery_qr_plain', currentQrPlain ? '1' : '0'); } catch (e) { /* 隐私模式忽略 */ }
+    try {
+      renderQr();
+      toast(currentQrPlain ? '已切换标准黑白码，真机最易扫' : '已切换回星空美化版');
+    } catch (e) {
+      toast('切换失败：' + (e && e.message ? e.message : '未知错误'));
+    }
+  };
   $('qrCopyBtn').onclick = () => { if (currentQrDrawId) copyLink(currentQrDrawId); };
   $('qrDownloadBtn').onclick = () => {
     const a = document.createElement('a');
     a.href = LotteryQR.toDataURL($('qrCanvas'));
-    a.download = (currentQrDrawTitle || '抽签') + '-二维码.png';
+    a.download = (currentQrDrawTitle || '抽签') + (currentQrPlain ? '-二维码-黑白.png' : '-二维码.png');
     a.click();
   };
   $('qrUrl').onclick = () => {
