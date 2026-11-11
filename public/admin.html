@@ -41,11 +41,11 @@
       <div class="top-actions">
         <button class="btn-ghost" id="backupBtn" title="导出全部抽签与参与名单为 JSON">备份</button>
         <button class="btn-primary" id="newBtn">+ 新建抽签</button>
-        <button class="btn-ghost" id="logoutBtn">退出</button>
       </div>
     </header>
 
     <div class="wrap">
+      <div id="catBar" class="cat-bar"></div>
       <div id="drawList" class="draw-list"></div>
       <div id="empty" class="empty hidden">还没有抽签活动，点击右上角「新建抽签」开始。</div>
     </div>
@@ -64,6 +64,9 @@
         </label>
         <label class="fld">活动说明（可选）
           <textarea id="f_desc" rows="2" maxlength="200" placeholder="展示给用户看的说明文字"></textarea>
+        </label>
+        <label class="fld">所属分类
+          <select id="f_cat"><option value="">未分类</option></select>
         </label>
         <label class="fld row">
           <span>防止同一姓名重复抽签</span>
@@ -113,15 +116,35 @@
     </div>
   </div>
 
-  <!-- 弹窗：统计 -->
-  <div class="modal hidden" id="statModal">
-    <div class="modal-box">
-      <div class="modal-head">
-        <h3>抽签统计</h3>
-        <button class="x" data-close>×</button>
+  <!-- 弹窗：分类管理（文件夹由主理人自行创建 / 重命名 / 删除）-->
+  <div class="modal hidden" id="catManageModal">
+    <div class="modal-box cat-box">
+      <div class="modal-head"><h3>分类管理</h3><button class="x" data-close>×</button></div>
+      <div class="modal-body">
+        <div class="cat-new">
+          <input id="catNewName" type="text" maxlength="24" placeholder="新建分类，例如：广东在线" />
+          <button class="btn-primary sm" id="catCreateBtn">新建</button>
+        </div>
+        <div id="catManageList" class="cat-list"></div>
+        <p class="tip">删除分类只会把里面的抽签移回「未分类」，不会删除抽签和参与记录。</p>
       </div>
-      <div class="modal-body" id="statBody"></div>
       <div class="modal-foot"><button class="btn-ghost" data-close>关闭</button></div>
+    </div>
+  </div>
+
+  <!-- 弹窗：把某个抽签归入分类 -->
+  <div class="modal hidden" id="catAssignModal">
+    <div class="modal-box cat-box">
+      <div class="modal-head"><h3>归入分类</h3><button class="x" data-close>×</button></div>
+      <div class="modal-body">
+        <p class="cat-target" id="catTarget"></p>
+        <div id="catAssignList" class="cat-list"></div>
+        <div class="cat-new">
+          <input id="catQuickName" type="text" maxlength="24" placeholder="新分类名称，例如：广东在线" />
+          <button class="btn-ghost sm" id="catQuickBtn">新建并归入</button>
+        </div>
+      </div>
+      <div class="modal-foot"><button class="btn-ghost" data-close>取消</button></div>
     </div>
   </div>
 

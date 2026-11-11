@@ -96,10 +96,12 @@
 
   function spawnShooter() {
     if (Math.random() < 0.012 && shooters.length < 2) {
-      const left = Math.random() < 0.5;
+      // 方向统一：一律从屏幕右上方外侧出发，向左下方滑落（vx 恒为负，vy 恒为正）。
+      // 历史版本曾以 Math.random() < 0.5 随机左右两侧，视觉上一会往左一会往右。
+      // 尾巴由 tx = x - vx * 7 反推，vx 为负时尾巴自然落在右上方，无需改动绘制逻辑。
       shooters.push({
-        x: left ? -60 : w + 60, y: Math.random() * h * 0.45,
-        vx: (left ? 1 : -1) * (7 + Math.random() * 5), vy: 2.5 + Math.random() * 2.5,
+        x: w + 60, y: Math.random() * h * 0.45,
+        vx: -(7 + Math.random() * 5), vy: 2.5 + Math.random() * 2.5,
         life: 1
       });
     }

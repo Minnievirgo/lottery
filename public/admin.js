@@ -7,6 +7,11 @@
   let currentListEmpty = true;
   let currentQrDrawId = null;
   let currentQrDrawTitle = '';
+  // 分类（文件夹）：categories 为服务端列表；activeCat = null 全部 / '__none__' 未分类 / 分类 id
+  let categories = [];
+  let activeCat = null;
+  let currentCatDrawId = null;
+  let currentCatDrawTitle = '';
   // 真机扫不出装饰版时的一键兜底：切到标准黑白码，并在本机记住选择（下次打开仍生效）。
   let currentQrPlain = false;
   try { currentQrPlain = localStorage.getItem('lottery_qr_plain') === '1'; } catch (e) { /* 隐私模式忽略 */ }
@@ -61,22 +66,69 @@
     });
   });
   $('pwd').addEventListener('keydown', e => { if (e.key === 'Enter') $('loginBtn').click(); });
-  $('logoutBtn').addEventListener('click', () => { localStorage.removeItem('lottery_token'); location.reload(); });
+  // 单管理员账号，不需要「退出」按钮；token 失效或密码变更时由下方 401 分支自动回登录页。
 
   // 已登录则直接进入面板
   if (token) { $('login').classList.add('hidden'); $('panel').classList.remove('hidden'); loadDraws(); }
 
-  // ---- 列表 ----
+  // ---- 列表 + 分类栏 ----
   function loadDraws() {
-    api('/api/admin/draws').then(res => {
+    return Promise.all([api('/api/admin/draws'), api('/api/admin/categories')]).then(([res, catRes]) => {
       if (res.draws === undefined) { // 401
         localStorage.removeItem('lottery_token'); location.reload(); return;
       }
       const list = res.draws || [];
+      categories = catRes.categories || [];
+      // 正在筛选的分类若被删掉，退回「全部」，避免停在空白页
+      if (activeCat && activeCat !== '__none__' && !categories.some(c => c.id === activeCat)) activeCat = null;
+      renderCatBar(list);
+      const shown = filterDraws(list);
       const box = $('drawList'); box.innerHTML = '';
-      $('empty').classList.toggle('hidden', list.length > 0);
-      list.forEach(d => box.appendChild(renderCard(d)));
+      shown.forEach(d => box.appendChild(renderCard(d)));
+      $('empty').classList.toggle('hidden', shown.length > 0);
+      $('empty').textContent = list.length === 0
+        ? '还没有抽签活动，点击右上角「新建抽签」开始。'
+        : '该分类下还没有抽签，可用卡片上的「分类」按钮归入。';
+      syncCatSelect();
     });
+  }
+
+  function filterDraws(list) {
+    if (activeCat === null) return list;
+    if (activeCat === '__none__') return list.filter(d => !d.category_id);
+    return list.filter(d => d.category_id === activeCat);
+  }
+
+  function renderCatBar(list) {
+    const bar = $('catBar');
+    const none = list.filter(d => !d.category_id).length;
+    const chips = [{ key: null, label: '全部', count: list.length, icon: '' }];
+    categories.forEach(c => chips.push({
+      key: c.id, label: c.name, icon: '📁',
+      count: list.filter(d => d.category_id === c.id).length
+    }));
+    if (none) chips.push({ key: '__none__', label: '未分类', count: none, icon: '' });
+    bar.innerHTML = '';
+    chips.forEach(ch => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      const isActive = (activeCat === null && ch.key === null) || (activeCat !== null && activeCat === ch.key);
+      b.className = 'cat-chip' + (isActive ? ' active' : '');
+      b.textContent = (ch.icon ? ch.icon + ' ' : '') + ch.label + ' ' + ch.count;
+      b.onclick = () => { activeCat = ch.key; loadDraws(); };
+      bar.appendChild(b);
+    });
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'cat-chip cat-chip-add';
+    add.textContent = '+ 新建分类';
+    add.onclick = () => openCatManage();
+    bar.appendChild(add);
+  }
+
+  function catBadge(d) {
+    const c = categories.find(x => x.id === d.category_id);
+    return c ? `<span class="dc-cat">📁 ${escapeHtml(c.name)}</span>` : '';
   }
 
   function renderCard(d) {
@@ -89,11 +141,11 @@
         <span class="badge-st ${open ? 'badge-open' : 'badge-closed'}">${open ? '进行中' : '已结束'}</span>
       </div>
       <p class="dc-desc">${escapeHtml(d.description || '')}</p>
-      <div class="dc-stats"><div>参与 <b>${d.participantCount}</b></div><div>结果项 <b>${(d.items||[]).length}</b></div></div>
+      <div class="dc-stats"><div>参与 <b>${d.participantCount}</b></div><div>结果项 <b>${(d.items||[]).length}</b></div>${catBadge(d)}</div>
       <div class="dc-actions">
         <button data-act="edit">编辑</button>
         <button data-act="list">名单</button>
-        <button data-act="stat">统计</button>
+        <button data-act="cat">分类</button>
         <button data-act="toggle">${open ? '结束' : '开启'}</button>
         <button data-act="link">复制链接</button>
         <button data-act="qr">二维码</button>
@@ -101,7 +153,7 @@
       </div>`;
     el.querySelector('[data-act=edit]').onclick = () => openEdit(d);
     el.querySelector('[data-act=list]').onclick = () => openList(d.id, d.title);
-    el.querySelector('[data-act=stat]').onclick = () => openStat(d.id);
+    el.querySelector('[data-act=cat]').onclick = () => openCatAssign(d.id, d.title);
     el.querySelector('[data-act=toggle]').onclick = () => toggleDraw(d.id, open);
     el.querySelector('[data-act=link]').onclick = () => copyLink(d.id);
     el.querySelector('[data-act=qr]').onclick = () => openQr(d.id, d.title);
@@ -135,6 +187,10 @@
     $('f_title').value = d ? d.title : '';
     $('f_desc').value = d ? (d.description || '') : '';
     $('f_anti').checked = d ? !!d.anti_duplicate : true;
+    // 分类下拉：编辑时取当前归属；新建时若正在看某个分类，默认就归到这个分类
+    syncCatSelect();
+    $('f_cat').value = d ? (d.category_id || '')
+      : (activeCat && activeCat !== '__none__' ? activeCat : '');
     const box = $('items'); box.innerHTML = '';
     const items = (d && d.items) || [{ name: '一等奖', limit: 1, weight: 1 }, { name: '二等奖', limit: 3, weight: 1 }, { name: '谢谢参与', limit: -1, weight: 1 }];
     items.forEach(it => box.appendChild(itemRow(it)));
@@ -183,7 +239,8 @@
     if (!items.length) { toast('请至少添加一个结果项'); return; }
     const payload = {
       title, description: $('f_desc').value.trim(),
-      antiDuplicate: $('f_anti').checked, items
+      antiDuplicate: $('f_anti').checked, items,
+      categoryId: $('f_cat').value || null
     };
     const p = editingId
       ? api('/api/admin/draws/' + editingId, { method: 'PUT', body: JSON.stringify(payload) })
@@ -250,30 +307,119 @@
       });
   };
 
-  // ---- 统计 ----
-  function openStat(id) {
-    api('/api/admin/draws/' + id + '/stats').then(res => {
-      const box = $('statBody'); box.innerHTML = '';
-      const total = res.total || 0;
-      const head = document.createElement('p');
-      head.style.cssText = 'color:var(--muted);font-size:13px;margin:0 0 16px';
-      head.textContent = '总参与人数：' + total;
-      box.appendChild(head);
-      (res.items || []).forEach(it => {
-        const pct = total ? Math.round((it.count / total) * 100) : 0;
-        const max = Math.max(1, ...(res.items.map(x => x.count)));
-        const w = Math.round((it.count / max) * 100);
-        const div = document.createElement('div');
-        div.className = 'stat-item';
-        const lim = it.limit === -1 ? '不限量' : ('上限 ' + it.limit);
-        div.innerHTML = `
-          <div class="stat-name"><span style="color:${it.color}">${escapeHtml(it.name)}</span><b>${it.count} 人 · ${lim}</b></div>
-          <div class="stat-bar"><div class="stat-fill" style="width:${w}%;background:${it.color}"></div></div>`;
-        box.appendChild(div);
-      });
-      openModal('statModal');
+  // ---- 分类（文件夹）----
+  // 统计模块已按需求移除：卡片按钮改为「分类」，弹窗改为「分类管理 / 归入分类」。
+  function syncCatSelect() {
+    const sel = $('f_cat');
+    if (!sel) return;
+    const keep = sel.value;
+    sel.innerHTML = '<option value="">未分类</option>' +
+      categories.map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.name)}</option>`).join('');
+    sel.value = keep;
+  }
+
+  function createCategoryAnd(name, cb) {
+    const n = String(name || '').trim();
+    if (!n) { toast('请填写分类名称'); return; }
+    api('/api/admin/categories', { method: 'POST', body: JSON.stringify({ name: n }) }).then(r => {
+      if (r.error) { toast(r.error === 'duplicate_name' ? '已有同名分类' : '新建分类失败'); return; }
+      cb && cb(r.category);
     });
   }
+
+  function openCatManage() {
+    $('catNewName').value = '';
+    renderCatManage();
+    openModal('catManageModal');
+  }
+  function renderCatManage() {
+    const box = $('catManageList'); box.innerHTML = '';
+    if (!categories.length) {
+      const p = document.createElement('div');
+      p.className = 'cat-empty';
+      p.textContent = '还没有分类，在上面输入名称新建一个。';
+      box.appendChild(p);
+      return;
+    }
+    categories.forEach(c => {
+      const row = document.createElement('div');
+      row.className = 'cat-row';
+      row.innerHTML = `<span class="cat-name">📁 ${escapeHtml(c.name)}</span><span class="cat-count">${c.drawCount} 个抽签</span>`;
+      const ren = document.createElement('button');
+      ren.className = 'btn-ghost sm'; ren.textContent = '重命名';
+      ren.onclick = () => {
+        const name = prompt('输入新的分类名称', c.name);
+        if (name === null) return;
+        if (!String(name).trim()) { toast('分类名称不能为空'); return; }
+        api('/api/admin/categories/' + encodeURIComponent(c.id), {
+          method: 'PUT', body: JSON.stringify({ name })
+        }).then(r => {
+          if (r.error) { toast(r.error === 'duplicate_name' ? '已有同名分类' : '重命名失败'); return; }
+          toast('已重命名');
+          loadDraws().then(renderCatManage);
+        });
+      };
+      const del = document.createElement('button');
+      del.className = 'btn-ghost sm danger'; del.textContent = '删除';
+      del.onclick = () => {
+        if (!confirm('删除分类「' + c.name + '」？里面的抽签会移回「未分类」，抽签和参与记录不会删除。')) return;
+        api('/api/admin/categories/' + encodeURIComponent(c.id), { method: 'DELETE' }).then(r => {
+          if (r.error) { toast('删除失败'); return; }
+          toast('已删除分类');
+          loadDraws().then(renderCatManage);
+        });
+      };
+      row.appendChild(ren);
+      row.appendChild(del);
+      box.appendChild(row);
+    });
+  }
+  $('catCreateBtn').onclick = () => createCategoryAnd($('catNewName').value, () => {
+    $('catNewName').value = '';
+    toast('分类已创建');
+    loadDraws().then(renderCatManage);
+  });
+  $('catNewName').addEventListener('keydown', e => { if (e.key === 'Enter') $('catCreateBtn').click(); });
+
+  function openCatAssign(id, title) {
+    currentCatDrawId = id;
+    currentCatDrawTitle = String(title || '');
+    $('catTarget').textContent = '把「' + currentCatDrawTitle + '」放到：';
+    $('catQuickName').value = '';
+    renderCatAssign();
+    openModal('catAssignModal');
+  }
+  function renderCatAssign() {
+    const box = $('catAssignList'); box.innerHTML = '';
+    const rows = [{ id: '', name: '未分类（移出文件夹）', count: null }].concat(
+      categories.map(c => ({ id: c.id, name: c.name, count: c.drawCount }))
+    );
+    rows.forEach(r => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'cat-option';
+      b.innerHTML = '<span>📁 ' + escapeHtml(r.name) + '</span>' +
+        (r.count == null ? '' : '<span class="cat-count">' + r.count + ' 个</span>');
+      b.onclick = () => assignCategory(r.id);
+      box.appendChild(b);
+    });
+  }
+  function assignCategory(catId) {
+    if (!currentCatDrawId) return;
+    api('/api/admin/draws/' + encodeURIComponent(currentCatDrawId), {
+      method: 'PUT', body: JSON.stringify({ categoryId: catId })
+    }).then(r => {
+      if (!r.ok) { toast('操作失败：' + (r.error || '')); return; }
+      closeModal($('catAssignModal'));
+      toast(catId ? '已归入分类' : '已移出分类');
+      loadDraws();
+    });
+  }
+  $('catQuickBtn').onclick = () => createCategoryAnd($('catQuickName').value, cat => {
+    $('catQuickName').value = '';
+    loadDraws().then(() => { renderCatAssign(); assignCategory(cat.id); });
+  });
+  $('catQuickName').addEventListener('keydown', e => { if (e.key === 'Enter') $('catQuickBtn').click(); });
 
   // ================= F2：导出发言顺序 =================
   const ScheduleFormState = {
