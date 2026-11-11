@@ -18,13 +18,19 @@ let db = null;      // node:sqlite DatabaseSync（local）
 let client = null;  // @libsql/client Client（turso）
 
 const SCHEMA = `
+CREATE TABLE IF NOT EXISTS categories (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS draws (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
   description TEXT DEFAULT '',
   status TEXT NOT NULL DEFAULT 'open',
   anti_duplicate INTEGER NOT NULL DEFAULT 1,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  category_id TEXT
 );
 CREATE TABLE IF NOT EXISTS results (
   id TEXT PRIMARY KEY,
@@ -50,6 +56,25 @@ CREATE INDEX IF NOT EXISTS idx_part_draw ON participants(draw_id);
 CREATE INDEX IF NOT EXISTS idx_part_name ON participants(draw_id, name);
 `;
 
+// ---- 幂等列迁移 ----
+// CREATE TABLE IF NOT EXISTS 不会给「已存在」的旧库补列：线上 Turso 库建于 2026-11-08，
+// 当时还没有 category_id。新版本部署时必须就地 ALTER，否则分类一写入就报 no such column。
+// 这里只用底层 db / client，绝不能走 get()/run()：那两个函数内部 `await ready`，
+// 而 init() 正是 ready 的本体，会自锁死等。
+async function ensureCategoryColumn(client, sqlite) {
+  if (sqlite) {
+    const cols = sqlite.prepare('PRAGMA table_info(draws)').all();
+    if (!cols.some(c => c.name === 'category_id')) sqlite.exec('ALTER TABLE draws ADD COLUMN category_id TEXT');
+    return;
+  }
+  // libSQL：先探测列是否存在，避免依赖各家 duplicate column 的错误文案
+  try { await client.execute('SELECT category_id FROM draws LIMIT 1'); return; } catch (_) { /* 需要补列 */ }
+  try { await client.execute('ALTER TABLE draws ADD COLUMN category_id TEXT'); } catch (e) {
+    // 并发实例可能已补上；再探一次，确实存在就放行
+    try { await client.execute('SELECT category_id FROM draws LIMIT 1'); return; } catch (_) { throw e; }
+  }
+}
+
 async function init() {
   if (MODE === 'turso') {
     // 延迟加载：本地模式不装依赖也能跑
@@ -58,6 +83,7 @@ async function init() {
     console.log('[db] 运行时 TURSO_URL =', JSON.stringify(TURSO_URL));
     client = createClient({ url: TURSO_URL, authToken: TURSO_TOKEN || undefined, intMode: 'number' });
     await client.executeMultiple(SCHEMA);
+    await ensureCategoryColumn(client, null);
     console.log('[db] 模式: turso（云端持久库）', TURSO_URL.replace(/:\/\/.*@/, '://***@'));
   } else {
     const { DatabaseSync } = require('node:sqlite');
@@ -65,6 +91,7 @@ async function init() {
     if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
     db = new DatabaseSync(path.join(DATA_DIR, 'app.db'));
     db.exec(SCHEMA);
+    await ensureCategoryColumn(null, db);
     console.log('[db] 模式: local（本地 SQLite）', path.join(DATA_DIR, 'app.db'));
   }
 }
@@ -149,12 +176,60 @@ async function insertItems(drawId, items, offset = 0) {
   }
 }
 
+// ---- 分类（文件夹）----
+// 分类只做「给抽签贴标签」，删分类绝不删抽签：把旗下抽签移回「未分类」即可。
+function cleanCategoryName(name) {
+  return String(name == null ? '' : name).trim().slice(0, 24);
+}
+
+async function listCategories() {
+  const cats = await all(`SELECT * FROM categories ORDER BY created_at`);
+  const counts = await all(`SELECT category_id, COUNT(*) c FROM draws WHERE category_id IS NOT NULL GROUP BY category_id`);
+  const map = {};
+  counts.forEach(r => { map[r.category_id] = Number(r.c); });
+  return cats.map(c => ({
+    id: c.id, name: c.name, createdAt: Number(c.created_at), drawCount: map[c.id] || 0
+  }));
+}
+
+async function createCategory({ name }) {
+  const n = cleanCategoryName(name);
+  if (!n) return { error: 'name_required' };
+  if (await get(`SELECT id FROM categories WHERE name=?`, [n])) return { error: 'duplicate_name' };
+  const id = genId(5), created = Date.now();
+  await run(`INSERT INTO categories (id,name,created_at) VALUES (?,?,?)`, [id, n, created]);
+  return { ok: true, category: { id, name: n, createdAt: created, drawCount: 0 } };
+}
+
+async function renameCategory(id, name) {
+  const cur = await get(`SELECT id FROM categories WHERE id=?`, [id]);
+  if (!cur) return { error: 'not_found' };
+  const n = cleanCategoryName(name);
+  if (!n) return { error: 'name_required' };
+  if (await get(`SELECT id FROM categories WHERE name=? AND id<>?`, [n, id])) return { error: 'duplicate_name' };
+  await run(`UPDATE categories SET name=? WHERE id=?`, [n, id]);
+  return { ok: true, category: (await listCategories()).find(c => c.id === id) };
+}
+
+async function deleteCategory(id) {
+  const cur = await get(`SELECT id FROM categories WHERE id=?`, [id]);
+  if (!cur) return { error: 'not_found' };
+  await run(`UPDATE draws SET category_id=NULL WHERE category_id=?`, [id]);
+  await run(`DELETE FROM categories WHERE id=?`, [id]);
+  return { ok: true };
+}
+
 // ---- 抽签活动 ----
-async function createDraw({ title, description = '', antiDuplicate = true, items = [] }) {
+async function createDraw({ title, description = '', antiDuplicate = true, items = [], categoryId = null }) {
   const id = genId(6);
   const created = Date.now();
-  await run(`INSERT INTO draws (id,title,description,status,anti_duplicate,created_at) VALUES (?,?,?,?,?,?)`,
-    [id, String(title), String(description || ''), 'open', antiDuplicate ? 1 : 0, created]);
+  let cid = null;
+  if (categoryId) {
+    const c = await get(`SELECT id FROM categories WHERE id=?`, [categoryId]);
+    if (c) cid = categoryId;
+  }
+  await run(`INSERT INTO draws (id,title,description,status,anti_duplicate,created_at,category_id) VALUES (?,?,?,?,?,?,?)`,
+    [id, String(title), String(description || ''), 'open', antiDuplicate ? 1 : 0, created, cid]);
   await insertItems(id, items, 0);
   return getDrawRaw(id);
 }
@@ -175,11 +250,23 @@ async function getDrawPublic(id) {
 async function updateDraw(id, patch) {
   const cur = await getDrawRaw(id);
   if (!cur) return null;
+  // 分类：只有显式传了 categoryId 才改。undefined = 保持原值；null / '' = 移出分类。
+  // 单独一条 UPDATE 是为了不把 category_id 卷进「只改状态」的请求里。
+  if (patch.categoryId !== undefined) {
+    let cid = null;
+    if (patch.categoryId !== null && patch.categoryId !== '') {
+      const c = await get(`SELECT id FROM categories WHERE id=?`, [patch.categoryId]);
+      if (!c) return null;                 // 服务端按 not_found → 404
+      cid = patch.categoryId;
+    }
+    await run(`UPDATE draws SET category_id=? WHERE id=?`, [cid, id]);
+  }
   await run(`UPDATE draws SET title=?, description=?, status=?, anti_duplicate=? WHERE id=?`,
     [patch.title != null ? String(patch.title) : cur.title,
      patch.description != null ? String(patch.description) : cur.description,
      patch.status != null ? patch.status : cur.status,
-     patch.antiDuplicate ? 1 : 0, id]);
+     // 「结束 / 开启」只传 status，不能顺手把防重复关掉（旧实现恒写 0 的数据损坏型 Bug）
+     patch.antiDuplicate === undefined ? cur.anti_duplicate : (patch.antiDuplicate ? 1 : 0), id]);
 
   if (Array.isArray(patch.items)) {
     const existing = await all(`SELECT * FROM results WHERE draw_id=?`, [id]);
@@ -298,8 +385,10 @@ async function exportCSV(drawId) {
 }
 
 // ---- 完整备份 / 恢复（长期使用的保险，与底层无关）----
-// 备份为一份 JSON：含全部抽签、结果项、参与名单，可用于换平台/兜底恢复。
+// 备份为一份 JSON：含全部分类、抽签、结果项、参与名单，可用于换平台/兜底恢复。
+// version 2 = 新增 categories 与 draws.category_id；恢复仍兼容 version 1（旧备份全部落在「未分类」）。
 async function exportAll() {
+  const categories = await all(`SELECT * FROM categories ORDER BY created_at`);
   const draws = await all(`SELECT * FROM draws ORDER BY created_at`);
   const out = [];
   for (const d of draws) {
@@ -307,18 +396,27 @@ async function exportAll() {
     const parts = await all(`SELECT * FROM participants WHERE draw_id=? ORDER BY drawn_at`, [d.id]);
     out.push({ ...d, items, participants: parts });
   }
-  return { version: 1, exportedAt: new Date().toISOString(), mode: MODE, draws: out };
+  return { version: 2, exportedAt: new Date().toISOString(), mode: MODE, categories, draws: out };
 }
 
 async function importAll(data) {
-  if (!data || data.version !== 1 || !Array.isArray(data.draws)) throw new Error('备份文件格式不正确');
+  if (!data || (data.version !== 1 && data.version !== 2) || !Array.isArray(data.draws)) throw new Error('备份文件格式不正确');
+  const cats = Array.isArray(data.categories) ? data.categories : [];
+  const catIds = new Set(cats.map(c => String(c.id)));
   return withTransaction(async (tx) => {
     await run(`DELETE FROM participants`, [], tx);
     await run(`DELETE FROM results`, [], tx);
     await run(`DELETE FROM draws`, [], tx);
+    await run(`DELETE FROM categories`, [], tx);
+    for (const c of cats) {
+      await run(`INSERT INTO categories (id,name,created_at) VALUES (?,?,?)`,
+        [String(c.id), String(c.name || ''), Number(c.created_at) || Date.now()], tx);
+    }
     for (const d of data.draws) {
-      await run(`INSERT INTO draws (id,title,description,status,anti_duplicate,created_at) VALUES (?,?,?,?,?,?)`,
-        [d.id, String(d.title || ''), String(d.description || ''), d.status || 'open', d.anti_duplicate ? 1 : 0, Number(d.created_at) || Date.now()], tx);
+      // 悬空的 category_id 一律降级为「未分类」，避免前端出现找不到名字的幽灵分类
+      const cid = (d.category_id && catIds.has(String(d.category_id))) ? String(d.category_id) : null;
+      await run(`INSERT INTO draws (id,title,description,status,anti_duplicate,created_at,category_id) VALUES (?,?,?,?,?,?,?)`,
+        [d.id, String(d.title || ''), String(d.description || ''), d.status || 'open', d.anti_duplicate ? 1 : 0, Number(d.created_at) || Date.now(), cid], tx);
       for (const it of (d.items || [])) {
         await run(`INSERT INTO results (id,draw_id,name,description,limit_count,weight,color,remaining,sort_order) VALUES (?,?,?,?,?,?,?,?,?)`,
           [it.id, d.id, String(it.name), String(it.description || ''), Number(it.limit_count), Number(it.weight) || 1,
@@ -329,7 +427,7 @@ async function importAll(data) {
           [p.id, d.id, String(p.name), p.result_id || null, p.result_name || null, Number(p.drawn_at) || Date.now()], tx);
       }
     }
-    return { ok: true, draws: data.draws.length };
+    return { ok: true, draws: data.draws.length, categories: cats.length };
   });
 }
 
@@ -337,5 +435,6 @@ module.exports = {
   ready, MODE,
   createDraw, getDrawRaw, getDrawPublic, updateDraw, deleteDraw,
   listDraws, participants, performDraw, stats, exportCSV,
+  listCategories, createCategory, renameCategory, deleteCategory,
   exportAll, importAll
 };

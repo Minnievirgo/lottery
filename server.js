@@ -117,6 +117,29 @@ async function handle(req, res) {
       const token = req.headers['x-admin-token'];
       if (!validAdminToken(token)) return send(res, 401, { ok: false, message: '未授权，请先登录' });
 
+      // ---------- 分类（文件夹）：名字由主理人在后台自行创建 ----------
+      if (pathname === '/api/admin/categories' && method === 'GET') {
+        return send(res, 200, { categories: await db.listCategories() });
+      }
+      if (pathname === '/api/admin/categories' && method === 'POST') {
+        const body = await readBody(req).catch(() => ({}));
+        const r = await db.createCategory({ name: body.name });
+        if (r.error) return send(res, 400, { ok: false, error: r.error });
+        return send(res, 200, r);
+      }
+      m = pathname.match(/^\/api\/admin\/categories\/([^/]+)$/);
+      if (m && method === 'PUT') {
+        const body = await readBody(req).catch(() => ({}));
+        const r = await db.renameCategory(m[1], body.name);
+        if (r.error) return send(res, r.error === 'not_found' ? 404 : 400, { ok: false, error: r.error });
+        return send(res, 200, r);
+      }
+      if (m && method === 'DELETE') {
+        const r = await db.deleteCategory(m[1]);
+        if (r.error) return send(res, 404, { ok: false, error: r.error });
+        return send(res, 200, r);
+      }
+
       // 列表
       if (pathname === '/api/admin/draws' && method === 'GET') {
         return send(res, 200, { draws: await db.listDraws() });
@@ -127,7 +150,8 @@ async function handle(req, res) {
         if (!body.title) return send(res, 400, { error: 'title_required' });
         const d = await db.createDraw({
           title: body.title, description: body.description,
-          antiDuplicate: body.antiDuplicate !== false, items: body.items || []
+          antiDuplicate: body.antiDuplicate !== false, items: body.items || [],
+          categoryId: body.categoryId || null
         });
         return send(res, 200, { ok: true, draw: d });
       }
@@ -165,7 +189,8 @@ async function handle(req, res) {
       if (m && method === 'GET') {
         return send(res, 200, { participants: await db.participants(m[1]) });
       }
-      // 统计
+      // 统计（只读）：2026-11-10 起后台 UI 已按主理人要求移除「统计」模块，
+      // 此接口与 db.stats 仅作为自动化回归的数据校验入口保留，界面无任何入口。
       m = pathname.match(/^\/api\/admin\/draws\/([^/]+)\/stats$/);
       if (m && method === 'GET') {
         const s = await db.stats(m[1]);
