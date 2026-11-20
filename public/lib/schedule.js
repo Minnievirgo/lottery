@@ -13,6 +13,8 @@ var DEFAULTS = {
   amEnd: '12:00',
   pmStart: '14:00',
   pmEnd: '17:30',
+  // 时段范围：both = 上午+下午（历史默认）；am = 仅上午；pm = 仅下午
+  sessionMode: 'both',
   duration: 10,
   gap: 5,
   breakEnabled: true,
@@ -80,8 +82,19 @@ function validateParams(raw) {
   if (title.length === 0) fields.title = '请填写表格标题';
   else if (title.length > 60) fields.title = '表格标题不能超过 60 字';
 
-  // ---- 四个时间：格式 + 先后关系 ----
-  var timeKeys = ['amStart', 'amEnd', 'pmStart', 'pmEnd'];
+  // ---- 时段范围：仅上午 / 仅下午 / 上午+下午 ----
+  // 旧请求没有该字段 → 默认 both，行为与改动前完全一致。
+  var sessionMode = pick(src, 'sessionMode', DEFAULTS.sessionMode);
+  if (sessionMode !== 'am' && sessionMode !== 'pm' && sessionMode !== 'both') sessionMode = 'both';
+
+  // ---- 四个时间：格式 + 先后关系（单时段只校验启用的那一段）----
+  // 仅上午：完全不读 pmStart / pmEnd；仅下午：完全不读 amStart / amEnd。
+  var both = sessionMode === 'both';
+  var needAm = both || sessionMode === 'am';
+  var needPm = both || sessionMode === 'pm';
+  var timeKeys = [];
+  if (needAm) timeKeys.push('amStart', 'amEnd');
+  if (needPm) timeKeys.push('pmStart', 'pmEnd');
   var mins = {};
   for (var i = 0; i < timeKeys.length; i++) {
     var k = timeKeys[i];
@@ -93,13 +106,13 @@ function validateParams(raw) {
     }
     mins[k] = n;
   }
-  if (isFinite(mins.amStart) && isFinite(mins.amEnd) && !(mins.amEnd > mins.amStart)) {
+  if (needAm && isFinite(mins.amStart) && isFinite(mins.amEnd) && !(mins.amEnd > mins.amStart)) {
     fields.amEnd = '上午结束时间必须晚于上午开始时间';
   }
-  if (isFinite(mins.amEnd) && isFinite(mins.pmStart) && !(mins.pmStart > mins.amEnd)) {
+  if (both && isFinite(mins.amEnd) && isFinite(mins.pmStart) && !(mins.pmStart > mins.amEnd)) {
     fields.pmStart = '下午开始时间必须晚于上午结束时间';
   }
-  if (isFinite(mins.pmStart) && isFinite(mins.pmEnd) && !(mins.pmEnd > mins.pmStart)) {
+  if (needPm && isFinite(mins.pmStart) && isFinite(mins.pmEnd) && !(mins.pmEnd > mins.pmStart)) {
     fields.pmEnd = '下午结束时间必须晚于下午开始时间';
   }
 
@@ -131,10 +144,12 @@ function validateParams(raw) {
     ok: true,
     params: {
       title: title,
-      amStart: String(pick(src, 'amStart', DEFAULTS.amStart)),
-      amEnd: String(pick(src, 'amEnd', DEFAULTS.amEnd)),
-      pmStart: String(pick(src, 'pmStart', DEFAULTS.pmStart)),
-      pmEnd: String(pick(src, 'pmEnd', DEFAULTS.pmEnd)),
+      sessionMode: sessionMode,
+      // 未启用的时段回退到 DEFAULTS（界面上对应输入框会被禁用清空，避免 NaN 漏进下游）
+      amStart: needAm ? String(pick(src, 'amStart', DEFAULTS.amStart)) : DEFAULTS.amStart,
+      amEnd: needAm ? String(pick(src, 'amEnd', DEFAULTS.amEnd)) : DEFAULTS.amEnd,
+      pmStart: needPm ? String(pick(src, 'pmStart', DEFAULTS.pmStart)) : DEFAULTS.pmStart,
+      pmEnd: needPm ? String(pick(src, 'pmEnd', DEFAULTS.pmEnd)) : DEFAULTS.pmEnd,
       duration: duration,
       gap: gap,
       breakEnabled: breakEnabled,
@@ -163,9 +178,11 @@ function computeSlots(sortedRows, params) {
   var pmStart = parseHHmm(p.pmStart);
   var pmEnd = parseHHmm(p.pmEnd);
   var breakEnabled = p.breakEnabled === true;
+  var mode = (p.sessionMode === 'am' || p.sessionMode === 'pm') ? p.sessionMode : 'both';
 
   var slots = [];
-  var period = 'am';
+  // 仅下午：全程 pm、直接从 pmStart 起排；仅上午 / 默认：从 amStart 起。
+  var period = mode === 'pm' ? 'pm' : 'am';
   var lastEnd = null;
   var sinceBreak = 0;
   var pendingBreak = false;
@@ -184,8 +201,8 @@ function computeSlots(sortedRows, params) {
 
     var switched = false;
     var breakApplied = pendingBreak;
-    if (period === 'am' && end > amEnd) {
-      // 上午排满 → 自动接下午；D17：午休优先于课间休息、计数重新起算
+    // 仅 when both：上午排满 → 自动接下午（午休优先于课间休息、计数重新起算）
+    if (mode === 'both' && period === 'am' && end > amEnd) {
       period = 'pm';
       switched = true;
       breakApplied = false;
@@ -194,7 +211,8 @@ function computeSlots(sortedRows, params) {
       end = start + D;
     }
 
-    var overflow = (period === 'pm' && end > pmEnd);
+    // 仅上午：按上午结束时间判容量；仅下午 / both 的下午段：按下午结束时间判
+    var overflow = mode === 'am' ? (end > amEnd) : (period === 'pm' && end > pmEnd);
     slots.push({
       seq: i + 1,
       name: rows[i].name,
@@ -233,6 +251,10 @@ function buildPlan(slots, params) {
   var list = Array.isArray(slots) ? slots : [];
   var p = params || {};
   var M = Number(p.breakMinutes);
+  // 仅上午时提示改为「延长上午结束时间」；both / 仅下午沿用原建议
+  var advice = (p.sessionMode === 'am')
+    ? '建议缩短发言时长 / 间隔，或延长上午结束时间'
+    : ADVICE;
   var plan = [];
   var emittedLunch = false;
   var Z = 0;
@@ -264,11 +286,11 @@ function buildPlan(slots, params) {
     return {
       ok: false,
       error: 'capacity_exceeded',
-      message: '当前时间参数最多可安排 ' + X + ' 人，当前 ' + Y + ' 人，超出 ' + Z + ' 人。' + ADVICE,
+      message: '当前时间参数最多可安排 ' + X + ' 人，当前 ' + Y + ' 人，超出 ' + Z + ' 人。' + advice,
       capacity: X,
       total: Y,
       overflow: Z,
-      advice: ADVICE
+      advice: advice
     };
   }
   return { ok: true, rows: plan, personCount: Y, params: p };
