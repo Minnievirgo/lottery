@@ -255,6 +255,9 @@ fieldset.fld-group legend { padding: 0 8px; font-size: 13px; color: var(--blue);
 }
 #sch_breakFields.disabled { opacity: .45; }
 #sch_breakFields.disabled input { pointer-events: none; }
+/* 单时段模式：未启用的时间框置灰、禁用交互；保留数值以便切回 both 时恢复 */
+#sch_sessionMode + .fld-msg { margin-top: 2px; }
+.fld input[type=time]:disabled { opacity: .38; pointer-events: none; cursor: not-allowed; }
 .form-error {
   margin-bottom: 14px; padding: 10px 12px; border-radius: 10px;
   border: 1px solid rgba(248,113,113,.5); background: rgba(248,113,113,.10);

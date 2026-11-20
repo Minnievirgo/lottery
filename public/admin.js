@@ -22,15 +22,17 @@
   // 不写入 localStorage，避免切换场次显示旧标题（与 lottery_token 同风格）。
   const SCH_KEY = 'lottery_schedule_params_v1';
   const SCH_DEFAULTS = Object.freeze({
+    sessionMode: 'both',
     amStart: '08:40', amEnd: '12:00', pmStart: '14:00', pmEnd: '17:30',
     duration: 10, gap: 5, breakEnabled: true, breakEvery: 7, breakMinutes: 15,
     remark: '1、个人答辩时长每人13分钟，其中报告呈现10分钟，评委提问3分钟。'
   });
   const SCH_TIME_KEYS = ['amStart', 'amEnd', 'pmStart', 'pmEnd'];
   const SCH_INT_KEYS = ['duration', 'gap', 'breakEvery', 'breakMinutes'];
-  const SCH_ALL_KEYS = SCH_TIME_KEYS.concat(SCH_INT_KEYS, ['breakEnabled', 'remark']);
+  const SCH_ALL_KEYS = ['sessionMode'].concat(SCH_TIME_KEYS, SCH_INT_KEYS, ['breakEnabled', 'remark']);
   const SCH_FIELD_IDS = {
-    title: 'sch_title', amStart: 'sch_amStart', amEnd: 'sch_amEnd',
+    title: 'sch_title', sessionMode: 'sch_sessionMode',
+    amStart: 'sch_amStart', amEnd: 'sch_amEnd',
     pmStart: 'sch_pmStart', pmEnd: 'sch_pmEnd',
     duration: 'sch_duration', gap: 'sch_gap',
     breakEvery: 'sch_breakEvery', breakMinutes: 'sch_breakMinutes', remark: 'sch_remark'
@@ -429,6 +431,7 @@
         const raw = JSON.parse(localStorage.getItem(SCH_KEY) || 'null');
         if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
         // 逐字段类型校验后与 DEFAULTS 合并，任何非法值静默回退（R7）
+        if (['both', 'am', 'pm'].includes(raw.sessionMode)) out.sessionMode = raw.sessionMode;
         for (const k of SCH_TIME_KEYS) {
           const v = raw[k];
           if (typeof v === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(v)) out[k] = v;
@@ -459,6 +462,7 @@
   function readScheduleForm() {
     return {
       title: $('sch_title').value,
+      sessionMode: $('sch_sessionMode').value,
       amStart: $('sch_amStart').value,
       amEnd: $('sch_amEnd').value,
       pmStart: $('sch_pmStart').value,
@@ -488,16 +492,25 @@
     const title = String(p.title || '').trim();
     if (!title) f.title = '请填写表格标题';
     else if (title.length > 60) f.title = '表格标题不能超过 60 字';
+    // 时段范围：非法值静默回退 both（旧缓存 / 老请求不含该字段）
+    const mode = ['both', 'am', 'pm'].includes(p.sessionMode) ? p.sessionMode : 'both';
+    const both = mode === 'both';
+    const needAm = both || mode === 'am';
+    const needPm = both || mode === 'pm';
+    // 四个时间：仅校验启用时段（与服务端 schedule.validateParams 同规则，服务端权威）
     const mins = {};
     const labels = { amStart: '上午开始', amEnd: '上午结束', pmStart: '下午开始', pmEnd: '下午结束' };
-    for (const k of SCH_TIME_KEYS) {
+    const activeTimes = [];
+    if (needAm) activeTimes.push('amStart', 'amEnd');
+    if (needPm) activeTimes.push('pmStart', 'pmEnd');
+    for (const k of activeTimes) {
       const n = localParseHHmm(p[k]);
       if (isNaN(n)) f[k] = labels[k] + '时间格式不合法（需 HH:mm）';
       mins[k] = n;
     }
-    if (isFinite(mins.amStart) && isFinite(mins.amEnd) && !(mins.amEnd > mins.amStart)) f.amEnd = '上午结束时间必须晚于上午开始时间';
-    if (isFinite(mins.amEnd) && isFinite(mins.pmStart) && !(mins.pmStart > mins.amEnd)) f.pmStart = '下午开始时间必须晚于上午结束时间';
-    if (isFinite(mins.pmStart) && isFinite(mins.pmEnd) && !(mins.pmEnd > mins.pmStart)) f.pmEnd = '下午结束时间必须晚于下午开始时间';
+    if (needAm && isFinite(mins.amStart) && isFinite(mins.amEnd) && !(mins.amEnd > mins.amStart)) f.amEnd = '上午结束时间必须晚于上午开始时间';
+    if (both && isFinite(mins.amEnd) && isFinite(mins.pmStart) && !(mins.pmStart > mins.amEnd)) f.pmStart = '下午开始时间必须晚于上午结束时间';
+    if (needPm && isFinite(mins.pmStart) && isFinite(mins.pmEnd) && !(mins.pmEnd > mins.pmStart)) f.pmEnd = '下午结束时间必须晚于下午开始时间';
     const d = localToInt(p.duration);
     if (isNaN(d) || d <= 0) f.duration = '每人发言时长必须大于 0 分钟';
     const g = localToInt(p.gap);
@@ -554,10 +567,26 @@
   }
   $('sch_breakEnabled').addEventListener('change', syncBreakFields);
 
+  // 时段范围联动：仅上午 → 禁用下午两框；仅下午 → 禁用上午两框；both → 全启用。
+  // 禁用框不会被 readScheduleForm 当有效值提交校验；清掉旧错误提示避免残留红字。
+  function syncSessionMode() {
+    const mode = ['both', 'am', 'pm'].includes($('sch_sessionMode').value) ? $('sch_sessionMode').value : 'both';
+    const amOn = mode === 'both' || mode === 'am';
+    const pmOn = mode === 'both' || mode === 'pm';
+    [['amStart', amOn], ['amEnd', amOn], ['pmStart', pmOn], ['pmEnd', pmOn]].forEach(([k, on]) => {
+      const el = $(SCH_FIELD_IDS[k]);
+      if (!el) return;
+      el.disabled = !on;
+      if (!on) markField(k, '');
+    });
+  }
+  $('sch_sessionMode').addEventListener('change', () => { syncSessionMode(); liveValidate('sessionMode'); });
+
   function openSchedule() {
     if (currentListEmpty) { toast('暂无参与记录'); return; }
     if (!currentListDrawId) return;
     const saved = ScheduleFormState.load();
+    $('sch_sessionMode').value = saved.sessionMode;
     SCH_TIME_KEYS.forEach(k => { $(SCH_FIELD_IDS[k]).value = saved[k]; });
     SCH_INT_KEYS.forEach(k => { $(SCH_FIELD_IDS[k]).value = saved[k]; });
     $('sch_breakEnabled').checked = saved.breakEnabled;
@@ -568,6 +597,7 @@
     $('schError').textContent = '';
     $('schError').classList.add('hidden');
     syncBreakFields();
+    syncSessionMode();
     openModal('scheduleModal');
   }
   $('scheduleBtn').onclick = openSchedule;
